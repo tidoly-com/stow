@@ -1,0 +1,21 @@
+# Tests on every push to main and every pull request. Releases are made from tags (v0.1.0, …), not from
+# main: a customer's app sees a new version only when one is tagged and released (internal/update). The
+# release builds join here once their runners are set up — the Mac universal app, Windows (mingw-w64)
+# and Linux (zig) helpers are built on the operator's Mac for now, with scripts/release-*.sh.
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l internal cmd)" || { gofmt -l internal cmd; exit 1; }
+      # cmd/stow is the Mac and Windows app shell: nothing of it builds on Linux
+      - run: go vet $(go list ./... | grep -v '/cmd/stow$')
+      - run: go test $(go list ./... | grep -v '/cmd/stow$')

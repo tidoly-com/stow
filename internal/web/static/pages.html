@@ -1,0 +1,507 @@
+{{define "name"}}<small>tidoly</small> stow{{end}}
+
+{{define "i"}}<svg class="i" aria-hidden="true"><use href="/static/icons.svg#{{.}}"/></svg>{{end}}
+
+{{define "head"}}<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · tidoly stow</title><link rel="icon" href="/static/favicon.png"><link rel="apple-touch-icon" href="/static/favicon.png"><link rel="stylesheet" href="/static/app.css"><script src="/static/theme.js"></script><script src="/static/page.js" defer></script></head><body{{with .Album}} data-album="{{.}}"{{end}}>{{end}}
+
+{{define "nav"}}<input type="checkbox" id="drawer" hidden>
+<header class="top">
+<label for="drawer" class="icon burger" aria-label="메뉴">{{template "i" "menu"}}</label>
+<a class="brand" href="/">{{template "name"}}</a>
+{{if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
+<details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
+<div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
+<a href="/status">폰 연결 · 상태</a><a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
+<div class="theme" role="group" aria-label="화면"><span>화면</span><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">밝게</button><button type="button" data-theme-set="dark">어둡게</button></div>
+<form method="post" action="/logout"><button>로그아웃</button></form>
+</div></details>
+</header>
+{{if .Bar}}<div class="selbar" role="toolbar" aria-label="고른 사진">
+<button class="icon" data-act="clear" aria-label="고르기 끝내기">{{template "i" "close"}}</button><b class="count"></b>
+{{if eq .Bar "trash"}}<button class="button quiet" data-act="restore">{{template "i" "restore"}}<span>복원</span></button>
+{{else}}<button class="button quiet own" data-act="favorite">{{template "i" "heart"}}<span>즐겨찾기</span></button>
+<button class="button quiet own" data-act="share">{{template "i" "share"}}<span>공유하기</span></button>
+<button class="button quiet own" data-act="album">{{template "i" "album"}}<span>앨범에</span></button>
+{{if eq .Bar "album"}}<button class="button quiet own" data-act="unalbum"><span>앨범에서 빼기</span></button>{{end}}
+<button class="button quiet" data-act="download">{{template "i" "download"}}<span>받기</span></button>
+<button class="button quiet danger own" data-act="delete">{{template "i" "trash"}}<span>지우기</span></button>{{end}}
+</div>{{end}}
+<label for="drawer" class="scrim"></label>
+<nav class="side">
+<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
+<a href="/?show=videos"{{if eq .Tab "videos"}} aria-current="page"{{end}}>{{template "i" "video"}}동영상</a>
+<a href="/people"{{if eq .Tab "people"}} aria-current="page"{{end}}>{{template "i" "people"}}인물</a>
+<a href="/places"{{if eq .Tab "places"}} aria-current="page"{{end}}>{{template "i" "place"}}장소</a>
+<a href="/albums"{{if eq .Tab "albums"}} aria-current="page"{{end}}>{{template "i" "album"}}앨범</a>
+<a href="/trash"{{if eq .Tab "trash"}} aria-current="page"{{end}}>{{template "i" "trash"}}휴지통</a>
+{{if .User.IsAdmin}}<a href="/admin"{{if eq .Tab "admin"}} aria-current="page"{{end}}>{{template "i" "admin"}}관리</a>{{end}}
+<div class="side-foot">
+<a class="small" href="/licenses"{{if eq .Tab "licenses"}} aria-current="page"{{end}}>오픈소스 라이선스 · AGPL-3.0</a>
+<a class="small" href="{{source}}" target="_blank" rel="noopener">소스 코드 (GitHub)</a>
+<a class="by" href="https://www.tidoly.com" target="_blank" rel="noopener"><span>powered by <b>tidoly</b></span></a>
+</div>
+</nav>{{end}}
+
+{{define "foot"}}<dialog class="viewer" tabindex="-1"></dialog><dialog class="sheet"></dialog><div class="toast" role="status" hidden></div><script src="/static/app.js"></script></body></html>{{end}}
+
+{{define "cells"}}{{range .}}<a href="/api/assets/{{.ID}}/thumbnail?size=preview" data-photo="{{.ID}}"{{if .W}} data-w="{{.W}}" data-h="{{.H}}"{{end}} class="{{if .Video}}video {{end}}{{if .Favorite}}fav {{end}}{{if .Shared}}shared {{end}}{{if .By}}theirs{{end}}"><img loading="lazy" alt="" src="/api/assets/{{.ID}}/thumbnail"><i class="pick">{{template "i" "check"}}</i>{{if .Video}}<span class="len">{{template "i" "play"}}{{.Length}}</span>{{else if .Live}}<span class="len live">LIVE</span>{{end}}{{if .By}}<span class="by t{{.Tone}}" title="{{.ByName}} 님이 공유">{{.By}}</span>{{else}}<i class="act heart" data-quick="favorite" title="즐겨찾기">{{template "i" "heart"}}</i><i class="act share" data-quick="share" title="모두에게 공유">{{template "i" "share"}}</i>{{end}}</a>{{end}}{{end}}
+
+{{define "days"}}{{range .}}<div class="day"><h3><button class="pick" aria-label="이 날의 사진 모두 고르기">{{template "i" "check"}}</button>{{.Label}}</h3><div class="flow">{{template "cells" .Cells}}</div></div>{{end}}{{end}}
+
+{{define "login"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>
+{{with .Refused}}<div class="notice warn">{{template "i" "warn"}}<div>{{if eq . "account"}}이 구글 계정으로 된 계정이 이 서버에 없습니다. 서버 주인에게 더해 달라고 해 주세요.{{else if eq . "blocked"}}서버 주인이 이 계정의 tidoly 로그인을 막아 두었습니다.{{else}}로그인하지 못했습니다. 다시 해 주세요.{{end}}</div></div>{{end}}
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+{{if .Away}}{{if .Tidoly}}<p class="dim">이 서버의 사진을 보려면 tidoly(구글 계정)로 로그인합니다.</p>
+<p><a class="button" href="/auth/start">tidoly 로 로그인</a></p>
+{{else}}<div class="notice">{{template "i" "info"}}<div>주소와 비밀번호로 로그인하는 것은 <b>집 안에서만</b> 됩니다 — 이 PC 와 같은 와이파이에서 열어 주세요. 밖에서 쓰려면 관리 → 연결 설정에서 internet(tidoly 터널)으로 연결합니다.</div></div>{{end}}
+{{else}}<form method="post" action="/login" class="stack">
+<label>로그인 주소<input name="email" type="email" value="{{.Email}}" autocomplete="username" required autofocus></label>
+<label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
+<button class="button">로그인</button></form>
+{{if .Tidoly}}<p><a class="button quiet" href="/auth/start">tidoly 로 로그인</a></p>{{end}}{{end}}
+</div></body></html>{{end}}
+
+{{define "app-at"}}{{if eq system "windows"}}작업 표시줄 오른쪽 <b>트레이의 tidoly stow 아이콘</b>(안 보이면 ^ 를 누르면 나옵니다){{else if eq system "darwin"}}화면 맨 위 <b>메뉴 막대의 tidoly stow 아이콘</b>{{else}}이 PC 의 <b>서비스 tidoly-stow</b>{{end}}{{end}}
+{{define "app-bar"}}{{if eq system "windows"}}트레이 아이콘{{else if eq system "darwin"}}메뉴 막대의 아이콘{{else}}서비스{{end}}{{end}}
+
+{{define "licenses"}}{{template "head" .}}{{template "nav" .}}<main class="text help">
+<h1>오픈소스 라이선스</h1>
+<p>tidoly stow 는 <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">GNU AGPL-3.0</a> 으로 공개된 소스입니다. 이 서버를 쓰는 누구나 소스를 받을 수 있습니다 — <a href="{{source}}" target="_blank" rel="noopener">{{source}}</a>. 고쳐서 배포하거나 서비스로 띄우면 고친 소스도 같은 조건으로 공개해야 합니다. "tidoly" 와 "tidoly stow" 이름 · 아이콘은 이 라이선스에 들어 있지 않습니다(TRADEMARKS.md).</p>
+<h2>함께 쓴 것</h2>
+<p class="dim">장소 이름은 <a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a> 의 자료를 썼습니다 — <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. 인구 500명 이상의 도시와 한국의 마을 · 동네 이름을 골라 줄여서 이 프로그램에 넣었습니다.</p>
+<p class="dim">영상과 HEIC 사진의 작은 그림은 <a href="https://ffmpeg.org" target="_blank" rel="noopener">FFmpeg</a> 로 만듭니다 — <a href="https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html" target="_blank" rel="noopener">LGPL 2.1 이상</a>. 이 프로그램과 따로 된 실행 파일로 들어 있고, 같은 버전의 소스 주소와 빌드 설정은 앱 안의 <code>LICENSES/ffmpeg.txt</code> 에 있습니다.</p>
+<p class="dim">얼굴인식은 OpenCV 의 모델 <a href="https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet" target="_blank" rel="noopener">YuNet</a>(MIT) · <a href="https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface" target="_blank" rel="noopener">SFace</a>(Apache-2.0)을 <a href="https://onnxruntime.ai" target="_blank" rel="noopener">ONNX Runtime</a>(MIT)으로 이 PC 안에서 돌립니다 — 사진과 얼굴은 밖으로 나가지 않습니다. 고지는 앱 안의 <code>LICENSES</code> 에 있습니다.</p>
+<p class="dim">폰 앱은 <a href="https://immich.app" target="_blank" rel="noopener">Immich</a> 를 그대로 씁니다 — tidoly stow 는 Immich 와 관계없는 별도의 서버입니다. 앱이 기대하는 응답 틀 몇 개는 Immich 서버의 명세(AGPL-3.0)에서 뽑았습니다.</p>
+<p class="dim">이 프로그램은 Go 로 만들었고, frp(Apache-2.0) · SQLite(modernc, BSD) · gozxing(Apache-2.0) 등 여러 Go 모듈을 함께 묶었습니다 — MIT · BSD · Apache-2.0 · ISC · MPL-2.0.</p>
+{{if .GoNotices}}<h2>고지 전문</h2>
+<p class="dim">누르면 이 화면 위에 열립니다.</p>
+<ul>{{range .Files}}<li><a href="/licenses/files/{{.Path}}" data-notice>{{.Name}}</a></li>{{end}}</ul>
+{{with .GoFiles}}<details class="notices"><summary>Go 모듈의 라이선스 · NOTICE — 파일 {{len .}}개</summary><ul>{{range .}}<li><a href="/licenses/files/{{.Path}}" data-notice>{{.Name}}</a></li>{{end}}</ul></details>{{end}}{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "help"}}{{template "head" .}}{{template "nav" .}}<main class="text help">
+<h1>도움말 <small>tidoly stow {{.Version}}</small></h1>
+<p>tidoly stow는 내 PC에서 실행되는 독립적인 사진 서버입니다. 휴대폰에서는 호환되는 Immich 앱으로 tidoly stow에 연결해 사진을 보고 백업할 수 있습니다. tidoly stow와 Immich는 별개의 프로그램입니다.</p>
+{{if .Admin}}<p class="dim">처음 설정한 화면을 다시 보려면 — <a href="/start/screen">첫 설정 다시 보기</a></p>{{end}}
+<nav class="toc" aria-label="차례"><a href="#phone">휴대폰 연결</a><a href="#outside">집 밖에서 접속</a><a href="#photos">사진 정리</a><a href="#password">비밀번호를 잊었을 때</a><a href="#keep">사진 보관과 옮기기</a><a href="#app">앱 아이콘</a><a href="#trouble">연결이 안 될 때</a><a href="#ask">문의</a></nav>
+
+<h2 id="phone">1. 휴대폰 연결과 백업</h2>
+<ol>
+<li>App Store · Google Play에서 <b>Immich</b> 앱을 설치합니다.</li>
+<li>앱의 서버 주소에 아래 주소를 넣습니다. <a href="/status">폰 연결 · 상태</a>의 QR을 휴대폰 카메라로 찍어도 됩니다.</li>
+<li>{{if .Addr.Outside}}"어디서나" 주소는 <b>Login with tidoly</b>로, "집 안에서만" 주소는 이 서버의 로그인 주소와 비밀번호로 로그인합니다.{{else}}이 서버의 로그인 주소와 비밀번호로 로그인합니다.{{end}}</li>
+<li>앱에서 백업을 켭니다. 사진을 한 장 찍고 tidoly stow에 보이면 백업이 되고 있는 것입니다.</li>
+</ol>
+{{template "address" .Addr}}
+{{if not .Addr.Outside}}<p class="dim">이 주소로 붙으려면 휴대폰이 이 PC와 같은 와이파이에 있어야 합니다.</p>{{end}}
+<p>가족에게는 "가족 안내 복사"로 안내 글을 보내세요. {{template "invite" .Invite}}</p>
+
+<h2 id="outside">2. 집 밖에서 접속</h2>
+<p>관리 → <b>연결 설정</b>에서 고릅니다.</p>
+<ul>
+<li><b>internet</b> (tidoly 터널 방식, 베타) — 관리 → 연결 설정 → internet → <b>연결하기</b>를 누르고, tidoly에서 구글 계정으로 로그인해 주소(<code>&lt;이름&gt;.stow.tidoly.app</code>)를 고릅니다. 휴대폰 앱에는 <code>https://&lt;이름&gt;.stow.tidoly.app</code>을 넣고 <b>Login with tidoly</b>로 로그인합니다. 가족은 tidoly에서 그 주소에 구글 메일을 더하면 들어옵니다.</li>
+<li><b>VPN</b> (WireGuard) — 공유기에서 포트를 열 수 있으면 tidoly 없이 직접 잇습니다. <a href="#vpn">아래 가이드</a>를 보세요.</li>
+</ul>
+<h3 id="vpn">VPN (WireGuard) 가이드</h3>
+<p>tidoly 터널 없이 휴대폰과 이 PC를 VPN으로 직접 잇습니다. 이어지면 밖에서도 집 안과 똑같이 이 서버의 로그인 주소와 비밀번호로 씁니다. 공유기에서 포트 하나를 열 수 있어야 합니다.</p>
+<ol><li>이 PC에서 관리 → 연결 설정 → VPN의 <b>켜기</b>를 누릅니다.</li><li><b>바깥 주소</b>가 채워졌는지 봅니다. 집의 인터넷 주소가 자주 바뀌면 DDNS 이름(예: myhome.example.com)을 적으세요.</li><li>공유기에서 <b>UDP 30891</b>을 이 PC로 포트 포워딩합니다. 공유기마다 메뉴 이름이 다릅니다.</li><li><b>기기 더하기</b>로 휴대폰을 더하고, 휴대폰의 <b>WireGuard</b> 앱(App Store · Google Play)으로 그 기기의 QR을 찍습니다.</li><li>WireGuard 연결을 켠 채 Immich 앱의 서버 주소에 <code>http://10.30.0.1:30891</code>을 넣고 로그인합니다.</li></ol>
+
+<h2 id="photos">3. 사진 정리</h2>
+<ul>
+<li><b>인물</b> — 얼굴 인식 결과를 이용해 같은 사람의 사진을 모아 볼 수 있습니다. 사진 원본은 이 PC에 보관됩니다. 외부 접속 시에는 네트워크를 통해 사진을 조회할 수 있습니다.{{if eq .Faces "none"}} 이 PC에서는 얼굴 인식을 쓸 수 없습니다.{{end}}</li>
+<li><b>기존 사진 폴더</b> — 관리 → 기존 사진 폴더에서 이 PC의 폴더를 등록하면 옮기지 않고 그 자리에서 읽습니다. 폴더 등록을 해제해도 원본 사진은 삭제되지 않습니다. 폴더 안의 파일을 이동하거나 이름을 바꾸기 전에는 먼저 등록을 해제하세요. 다시 쓸 폴더라면 "잠시 끄기"로 읽어 둔 정보를 남겨 둘 수 있습니다.</li>
+<li><b>쿠폰</b> — 관리 → 자동 앨범에서 켜면 바코드가 있는 그림을 "쿠폰" 앨범에 모읍니다. 쿠폰이 아닌 것은 앨범에서 빼면 다시 들어오지 않습니다.</li>
+<li><b>휴지통</b> — 지운 사진은 30일 동안 휴지통에 있어 복원할 수 있습니다. 휴대폰 앱에서 지워도 같습니다.</li>
+</ul>
+
+<h2 id="password">4. 비밀번호를 잊었을 때</h2>
+<ul>
+<li><b>가족</b> — 관리자가 관리 → 사용자에서 그 사람 줄의 "비밀번호 새로 정하기"로 정해 줍니다.</li>
+<li><b>관리자</b> — 사진이 있는 PC에서 {{if eq system "linux"}}<code>tidoly-light -reset-owner</code>를 실행해 나온 링크를 그 PC의 브라우저로 엽니다{{else}}{{template "app-bar"}} → <b>관리자 비밀번호 변경</b>을 누릅니다{{end}}. tidoly에 연결해 두었다면 밖 주소에서 tidoly로 로그인해 관리 → 사용자에서 바꿔도 됩니다.</li>
+</ul>
+
+<h2 id="keep">5. 사진 보관과 옮기기</h2>
+<p>사진은 설치할 때 고른 폴더(<code>{{.Data}}</code>)에 있습니다. tidoly stow는 따로 백업하지 않으니, 이 폴더 전체(숨김 폴더 <code>.stow</code> 포함)를 다른 디스크에 복사해 두세요.</p>
+<p>다시 설치하거나 다른 PC로 옮길 때는 tidoly stow를 끄고 이 폴더를 통째로 옮긴 뒤, 설치 화면에서 그 폴더를 고르면 계정 · 앨범 · 설정이 그대로 돌아옵니다.</p>
+
+<h2 id="app">6. 앱 아이콘</h2>
+{{if eq system "linux"}}<p>tidoly stow는 이 PC의 서비스로 돕니다. 끄기 · 켜기는 <code>sudo systemctl stop tidoly-stow</code> · <code>start</code>.</p>
+{{else}}<p>{{template "app-at"}}에서 다음을 합니다. 창을 닫아도 사진 서버는 계속 돕니다.</p>
+<ul><li><b>열기</b> · <b>브라우저에서 열기</b></li><li><b>관리자 비밀번호 변경</b></li><li><b>끝내기</b> — 사진 서버까지 끕니다. 그동안 휴대폰 백업이 멈춥니다.</li></ul>{{end}}
+
+<h2 id="trouble">7. 연결이 안 될 때</h2>
+<ol><li>휴대폰과 이 PC가 같은 와이파이에 있는지, tidoly stow가 켜져 있는지 봅니다. 밖이라면 <a href="#outside">집 밖에서 접속</a>.</li>
+<li>{{if eq system "windows"}}처음 실행할 때 Windows 방화벽이 물었다면 허용해야 합니다.{{else if eq system "darwin"}}처음 실행할 때 macOS가 "들어오는 연결"이나 "로컬 네트워크"를 물었다면 허용해야 합니다 (시스템 설정 → 네트워크 → 방화벽).{{else}}방화벽이 있다면 30891 포트를 열어야 합니다.{{end}}</li>
+{{if ne system "linux"}}<li>그래도 안 되면 {{template "app-bar"}} → 끝내기, 그리고 앱을 다시 엽니다.</li>{{end}}</ol>
+
+<h2 id="ask">8. 문의</h2>
+<p class="ask-row"><a class="button" href="{{.Contact}}" target="_blank" rel="noopener">tidoly에 문의하기</a><button type="button" class="button quiet" data-copy="tidoly stow {{.Version}} · {{.System}}">{{template "i" "copy"}}<span>버전 복사</span></button> <span class="dim">tidoly stow {{.Version}} · {{.System}}</span></p>
+<p class="dim">무엇을 하다가 어떤 화면에서 생겼는지와 버전을 적어 주세요. 비밀번호와 사진은 보내지 마세요.</p>
+</main>{{template "foot" .}}{{end}}
+
+{{define "password"}}{{template "head" .}}{{template "nav" .}}<main class="text">
+<h1>비밀번호 바꾸기</h1>
+{{if .Done}}<div class="notice">{{template "i" "check"}}<div>비밀번호를 바꿨습니다. 폰의 Immich 앱은 로그인된 채 그대로 쓸 수 있습니다.</div></div>
+{{else}}{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+<form method="post" action="/me/password" class="stack narrow">
+<label>지금 비밀번호<input name="current" type="password" autocomplete="current-password" required autofocus></label>
+<label>새 비밀번호 <span class="dim">— 네 글자 이상</span><input name="password" type="password" autocomplete="new-password" minlength="4" required></label>
+<label>새 비밀번호 한 번 더<input name="again" type="password" autocomplete="new-password" minlength="4" required></label>
+<button class="button">바꾸기</button></form>{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "address"}}{{with .Outside}}<div class="address"><span class="where"><b>어디서나</b> · Login with tidoly</span><code>{{.}}</code><button type="button" class="button quiet" data-copy="{{.}}">{{template "i" "copy"}}<span>주소 복사</span></button></div>{{end}}
+<div class="address">{{if .Outside}}<span class="where"><b>집 안에서만</b> · 비밀번호</span>{{end}}<code>{{.Home}}</code><button type="button" class="button quiet" data-copy="{{.Home}}">{{template "i" "copy"}}<span>주소 복사</span></button></div>{{end}}
+
+{{define "invite"}}<button type="button" class="button quiet" data-copy="{{.}}" title="Immich 앱 설치와 서버 주소가 담긴 안내를 복사합니다 — 메신저로 보내세요">{{template "i" "share"}}<span>가족 안내 복사</span></button>{{end}}
+
+{{define "steps"}}<ol class="steps">{{range .}}<li class="{{.State}}"><i>{{if eq .State "done"}}✓{{else}}{{.N}}{{end}}</i><span>{{.Name}}</span></li>{{end}}</ol>{{end}}
+
+{{define "install-way"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>
+<h2>이 PC 를 어떻게 쓸까요?</h2>
+<div class="ways">
+<a class="way" href="/install/folder">{{template "i" "disk"}}<b>이 PC 에 사진 보관</b><span>가족의 폰 사진이 이 PC 의 하드에 모입니다. 이 PC 가 사진 서버가 되어 늘 켜 둡니다.</span></a>
+<a class="way" href="/install/connect">{{template "i" "photos"}}<b>다른 PC 의 사진 보기</b><span>집에 tidoly stow 를 쓰는 PC 가 이미 있으면, 이 PC 에서는 그 사진을 보기만 합니다. 이 PC 에는 사진도 서버도 두지 않습니다.</span></a>
+</div>
+</div></body></html>{{end}}
+
+{{define "install-connect"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>
+<h2>사진을 볼 PC</h2>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+{{if .Found}}<p class="dim">이 집에서 찾은 tidoly stow 입니다.</p>
+{{range .Found}}<form method="post" action="/install/connect" class="choice"><input type="hidden" name="address" value="{{.Address}}"><div><b>{{.Name}}</b><span class="dim">{{.Address}}</span></div><button class="button">이 PC 의 사진 보기</button></form>{{end}}
+{{else}}<p class="dim">이 집에서 tidoly stow 를 찾지 못했습니다. 사진을 보관하는 PC 에서 tidoly stow 가 켜져 있는지, 같은 와이파이인지 확인한 뒤 <a href="/install/connect">다시 찾기</a> 를 누르거나, 아래에 주소를 넣어 주세요.</p>{{end}}
+<form method="post" action="/install/connect" class="stack narrow"><label>주소로 연결 <span class="dim">— 그 PC 의 tidoly stow → 폰 연결 · 상태에 있는 주소</span><input name="address" value="{{.Address}}" placeholder="192.168.0.10:30891" required></label><button class="button quiet">연결</button></form>
+<p><a href="/install">← 돌아가기</a></p>
+</div></body></html>{{end}}
+
+{{define "install-connected"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>
+<p class="dim"><b>{{or .Name .Server}}</b> 의 사진을 엽니다…</p>
+<script>setTimeout(() => location.replace({{.Server}}), 1200);</script>
+</div></body></html>{{end}}
+
+{{define "install"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>사진을 둘 곳</h2>
+<p class="dim">고른 폴더 안에 원본(originals)과 tidoly stow 의 기록(.stow)을 만듭니다. 전에 쓰던 폴더를 고르면 계정 · 앨범 · 설정이 그대로 돌아옵니다.</p>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+{{with .Look}}<nav class="trail"><a href="/install/folder?at=">이 장비</a>{{range .Crumbs}} › <a href="/install/folder?at={{.Path}}">{{.Name}}</a>{{end}}</nav>
+{{if .At}}<form method="post" action="/install/folder" class="choice"><input type="hidden" name="path" value="{{.At}}"><div><b>{{.At}}</b><span class="dim">{{if $.Earlier}}전에 쓰던 tidoly stow 폴더입니다 — 이어서 씁니다{{else}}{{with .Free}}{{.}} 남음{{end}}{{end}}</span>{{if not $.Earlier}}<input name="name" placeholder="새 폴더 이름 (비우면 이 폴더 그대로)" maxlength="100" autocomplete="off" aria-label="새 폴더 이름">{{end}}</div><button class="button">이 폴더에 두기</button></form>{{end}}
+<ul class="dirs">{{if .Up}}<li><a href="/install/folder?at={{.Up}}">‹ 위로</a></li>{{end}}{{range .Dirs}}<li><a href="/install/folder?at={{.Path}}">{{template "i" "folder"}}<span>{{.Name}}</span></a></li>{{else}}<li class="dim">안에 폴더가 없습니다</li>{{end}}</ul>
+<p><a href="/install/folder">← 추천 위치로</a></p>
+{{else}}<form method="post" action="/install/folder" class="choice"><input type="hidden" name="path" value="{{.Suggest}}"><div><b>{{.Suggest}}</b><span class="dim">{{if .Again}}전에 쓰던 tidoly stow 폴더입니다 — 이어서 씁니다{{else}}추천 — 없으면 만듭니다{{end}}</span></div><button class="button">여기에 두기</button></form>
+<p><a href="/install/folder?at=">다른 폴더 고르기 — 외장 디스크 · 전에 쓰던 폴더</a></p>{{end}}
+</div></body></html>{{end}}
+
+{{define "install-prepare"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>준비</h2>
+<p class="dim">사진을 둘 곳: <b>{{.Chosen}}</b>{{if .Earlier}} — 전에 쓰던 tidoly stow 폴더라 이어서 씁니다{{end}}</p>
+<div class="parts" data-nothing="{{.Nothing}}">{{if .Nothing}}<p class="dim">받을 것이 없습니다.</p>{{end}}</div>
+<div class="notice warn" hidden>{{template "i" "warn"}}<div><b>받지 못했습니다.</b><span class="why"></span><form method="post" action="/install/prepare"><button class="button quiet">다시 받기</button></form></div></div>
+<form method="post" action="/install/finish" class="next"><button class="button" disabled>다음</button></form>
+<script>
+(() => {
+  const box = document.querySelector(".parts"), next = document.querySelector(".next button"), warn = document.querySelector(".notice.warn");
+  const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+  const words = { waiting: "기다리는 중", fetching: "받는 중", done: "받았습니다", there: "이미 있습니다", failed: "실패" };
+  const tick = () => fetch("/install/progress").then((r) => r.json()).then((p) => {
+    if (box.dataset.nothing !== "true") box.innerHTML = p.parts.map((s) =>
+      `<div class="part ${s.state}"><span>${s.name}</span><span class="dim">${words[s.state] || ""}${s.size ? " · " + mb(s.got) + " / " + mb(s.size) : s.got ? " · " + mb(s.got) : ""}</span>` +
+      `<progress max="${s.size || 1}" value="${s.state === "done" || s.state === "there" ? s.size || 1 : s.got}"></progress></div>`).join("");
+    warn.hidden = !p.error;
+    if (p.error) warn.querySelector(".why").textContent = p.error;
+    if (p.finished && !p.error) return next.form.submit();
+    if (!p.finished) setTimeout(tick, 400);
+  });
+  tick();
+})();
+</script>
+</div></body></html>{{end}}
+
+{{define "install-starting"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<p class="dim">사진 서버를 여는 중입니다…</p>
+<script>
+(() => {
+  const wait = () => fetch("/install/state").then((r) => r.status === 404 ? location.replace("/") : setTimeout(wait, 500), () => setTimeout(wait, 500));
+  setTimeout(wait, 800);
+})();
+</script>
+</div></body></html>{{end}}
+
+{{define "outside-ways"}}<div class="rows">
+<div class="row auto on"><span class="ico">{{template "i" "wifi"}}</span><span class="name"><b>home</b><span>폰과 브라우저가 이 PC 와 같은 와이파이에 있을 때 붙습니다. 이 서버의 로그인 주소와 비밀번호로 로그인합니다.</span></span><span class="acts"></span></div>
+{{with .Outside}}{{if .Host}}<div class="row auto on" id="outside"{{if .Busy}} data-refresh="5"{{end}}><span class="ico">{{template "i" "globe"}}</span><span class="name"><b>internet</b> <span class="dim">tidoly 터널 방식</span> <span class="tag">베타</span> <span class="tag">연결됨</span>{{with .Tunnel}} <span class="tag warn">{{.}}</span>{{end}}{{with .Cert}} <span class="tag warn">{{.}}</span>{{end}}<span class="desc">밖에서는 <b>https://{{.Host}}</b> 로 붙고 tidoly(구글 계정)로 로그인합니다.</span>{{with .Problem}}<span class="mark">※ {{.}}</span>{{end}}</span><span class="acts">{{if not $.Away}}<a class="button quiet" href="/admin/tidoly/connect{{if $.First}}?next=/outside{{end}}" data-connect>다시 연결</a>{{end}}<form method="post" action="/admin/tidoly/disconnect">{{if $.First}}<input type="hidden" name="next" value="/outside">{{end}}<button class="button quiet danger" data-confirm="tidoly 연결을 끊을까요? 밖에서는 이 서버에 붙지 않게 됩니다. 집 안에서는 그대로 씁니다.">연결 끊기</button></form></span></div>
+{{else}}<div class="row auto off" id="outside"><span class="ico">{{template "i" "globe"}}</span><span class="name"><b>internet</b> <span class="dim">tidoly 터널 방식</span> <span class="tag">베타</span><span class="desc">{{with .Last}}전에 쓰던 주소 <b>https://{{.}}</b> 로 다시 연결합니다 — tidoly 에서 그 주소를 고르세요.{{else}}한 주 30명 제한으로 인터넷 주소와 인증서를 받아 안전한 터널링을 사용합니다. 무료로 사용해 보세요.{{end}}</span>{{with .Problem}}<span class="mark">※ {{.}}</span>{{end}}</span><span class="acts">{{if $.Away}}<span class="dim">집 안에서 연결합니다</span>{{else}}<a class="button quiet" href="/admin/tidoly/connect{{if $.First}}?next=/outside{{end}}" data-connect>{{if .Last}}다시 연결{{else}}연결하기{{end}}</a>{{end}}</span></div>{{end}}{{end}}
+{{with $.VPN}}<div class="row auto{{if .On}} on{{else}} off{{end}}" id="vpn"><span class="ico">{{template "i" "shield"}}</span><span class="name"><b>VPN</b> <span class="dim">WireGuard 연결</span>{{if .On}} <span class="tag">켜 둠</span>{{end}}<span class="desc">VPN 을 사용하여 터널 없이도 어디서든 접속할 수 있습니다.</span></span><span class="acts"><a class="button quiet" href="/help#vpn">가이드 보기</a>{{if not $.Away}}<form method="post" action="/admin/vpn/switch">{{if $.First}}<input type="hidden" name="next" value="/outside">{{end}}{{if .On}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form>{{end}}</span></div>
+{{if and .On (not $.Away)}}<div class="vpn-detail">
+<form method="post" action="/admin/vpn/endpoint" class="vpn-line">{{if $.First}}<input type="hidden" name="next" value="/outside">{{end}}<label>바깥 주소<input name="endpoint" value="{{.Endpoint}}" placeholder="예: 203.0.113.7 또는 myhome.example.com" autocomplete="off"></label><button class="button quiet">저장</button></form>
+<p class="dim">공유기에서 <b>UDP {{.Port}}</b> 을 이 PC(<b>{{.Home}}</b>)로 포트 포워딩해 두세요. WireGuard 를 켠 휴대폰의 Immich 앱 서버 주소는 <code>{{.Server}}</code> 이고, 이 서버의 로그인 주소와 비밀번호로 들어옵니다.</p>
+{{if .Devices}}<ul class="vpn-devices">{{range .Devices}}<li><span><b>{{.Name}}</b> <span class="dim">{{.IP}}</span></span><details><summary class="button quiet">QR 보기</summary><img src="/admin/vpn/qr?id={{.ID}}" width="220" height="220" alt="{{.Name}} 의 WireGuard 설정 QR"></details><form method="post" action="/admin/vpn/devices/remove">{{if $.First}}<input type="hidden" name="next" value="/outside">{{end}}<input type="hidden" name="id" value="{{.ID}}"><button class="button quiet danger" data-confirm="{{.Name}} 의 VPN 연결을 뺄까요? 그 기기는 더 이상 VPN 으로 들어오지 못합니다.">빼기</button></form></li>{{end}}</ul>{{end}}
+<form method="post" action="/admin/vpn/devices" class="vpn-line">{{if $.First}}<input type="hidden" name="next" value="/outside">{{end}}<input name="name" placeholder="기기 이름 (예: 엄마 폰)" maxlength="60" autocomplete="off"><button class="button quiet">기기 더하기</button></form>
+<p class="dim">기기마다 따로 더하고, 그 기기의 WireGuard 앱으로 QR 을 찍습니다. QR 에는 그 기기의 열쇠가 들어 있으니 다른 사람에게 보이지 마세요.</p>
+</div>{{end}}{{else}}<div class="row auto off"><span class="ico">{{template "i" "shield"}}</span><span class="name"><b>VPN</b> <span class="dim">WireGuard 연결</span> <span class="tag warn">준비 중</span><span>VPN 을 사용하여 터널 없이도 어디서든 접속할 수 있습니다.</span></span><span class="acts"><a class="button quiet" href="/help#vpn">가이드 보기</a></span></div>{{end}}
+</div>
+{{end}}
+
+{{define "start-screen"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>화면</h2>
+<div class="ways themes" role="group" aria-label="화면">
+<button type="button" class="way" data-theme-set="system">{{template "i" "settings"}}<b>시스템</b><span>이 PC 의 설정대로</span></button>
+<button type="button" class="way" data-theme-set="light">{{template "i" "sun"}}<b>밝게</b><span>늘 밝은 화면</span></button>
+<button type="button" class="way" data-theme-set="dark">{{template "i" "moon"}}<b>어둡게</b><span>늘 어두운 화면</span></button>
+</div>
+<p><a class="button" href="/start/folders">다음: 기존 사진</a></p>
+</div></body></html>{{end}}
+
+{{define "start-folders"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>기존 사진 폴더</h2>
+<p>업로드 없이 이 장비의 사진을 인덱싱하여 봅니다. 외장USB등을 등록해놓고 연결하면 유용합니다.</p>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+{{if .Folders}}<div class="rows">{{range .Folders}}<div class="row folder"{{if .Running}} data-running{{end}}><span class="ico">{{template "i" "folder"}}</span><span class="name"><b>{{.Name}}</b>{{if .Running}} <span class="tag">훑는 중</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span><span class="count">{{.Owner}} 의 사진으로 · {{.Photos}}개{{with .State}}<br><span class="dim">{{.}}</span>{{end}}</span></div>{{end}}</div>{{end}}
+{{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{else}}<p><button type="button" class="button quiet" data-browse="import" data-next="/start/folders">{{template "i" "folder-plus"}}<span>폴더 고르기</span></button></p>{{end}}
+<p><a class="button" href="/start/auto">다음: 자동 정리</a></p>
+</div><dialog class="sheet"></dialog><div class="toast" role="status" hidden></div><script src="/static/app.js"></script></body></html>{{end}}
+
+{{define "start-auto"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>자동 정리</h2>
+<p>다음의 사진들을 자동으로 앨범으로 분류합니다. 장비 성능과 사용패턴에 따라 온오프 할 수 있습니다.</p>
+<div class="rows"><div class="row auto{{if eq .Faces "on"}} on{{else}} off{{end}}"><span class="ico">{{template "i" "people"}}</span><span class="name"><b>얼굴인식</b>{{if eq .Faces "on"}} <span class="tag">켜 둠</span>{{else if eq .Faces "waiting"}} <span class="tag">모델 받는 중</span>{{end}}<span>2번이상 나온 얼굴을 하나로 모아서 보게 합니다.</span></span>
+<span class="acts">{{if eq .Faces "none"}}<span class="dim">이 PC 에서는 쓸 수 없습니다</span>{{else if eq .Faces "waiting"}}<span class="dim">받는 중</span>{{else}}<form method="post" action="/admin/faces"><input type="hidden" name="next" value="/start/auto">{{if eq .Faces "on"}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form>{{end}}</span></div>
+<div class="row auto{{if .CouponsOn}} on{{else}} off{{end}}"><span class="ico">{{template "i" "album"}}</span><span class="name"><b>쿠폰인식</b>{{if .CouponsOn}} <span class="tag">켜 둠</span>{{end}}<span>바코드가 있는 스크린샷 · 저장한 그림을 쿠폰 앨범에 모읍니다.{{if not .CouponDays}} 유효기간은 맥에서만 읽습니다.{{end}}</span></span>
+<span class="acts"><form method="post" action="/admin/coupons"><input type="hidden" name="next" value="/start/auto">{{if .CouponsOn}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form></span></div></div>
+<p><a class="button" href="/outside">다음: 연결 설정</a></p>
+</div></body></html>{{end}}
+
+{{define "outside"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>연결 설정 <small class="dim">접속 위치</small></h2>
+{{template "outside-ways" .}}
+<p><a class="button" href="/welcome">다음: 폰 연결</a></p>
+</div></body></html>{{end}}
+
+{{define "phone"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>
+<h2>폰에 사진 백업 연결</h2>
+<ol class="phone-steps">
+<li><b>Immich 앱을 설치합니다.</b><span class="stores"><a class="button quiet" href="https://apps.apple.com/app/immich/id1613945652">App Store</a><a class="button quiet" href="https://play.google.com/store/apps/details?id=app.alextran.immich">Google Play</a></span></li>
+<li><b>이 주소를 복사해</b> 앱의 서버 주소 칸에 붙여 넣습니다.{{template "address" .Addr}}</li>
+<li>{{if .Addr.Outside}}"어디서나" 주소였다면 <b>Login with tidoly</b>로 구글 계정 로그인을, "집 안에서만" 주소였다면 받은 <b>로그인 주소와 비밀번호</b>로 로그인합니다.{{else}}받은 <b>로그인 주소와 비밀번호</b>로 로그인합니다.{{end}}</li>
+<li>앱에서 <b>백업</b>을 켜면 폰의 사진이 저장됩니다.</li>
+</ol>
+{{if not .Addr.Outside}}<p class="dim">폰이 그 PC 와 같은 와이파이에 있어야 합니다.</p>{{end}}
+</div></body></html>{{end}}
+
+{{define "welcome"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<h2>폰 연결</h2>
+<p>QR코드를 통해 해당 페이지를 폰으로 열어서 주소를 복사하세요.</p>
+<div class="phone"><img src="/welcome/qr.png" alt="서버 주소 QR" width="200" height="200">{{template "address" .Addr}}{{template "invite" .Invite}}</div>
+<div class="notice">{{template "i" "info"}}<div>{{if eq system "linux"}}<b>tidoly stow 는 이 PC 의 서비스로 백그라운드에서 동작합니다.</b>부팅하면 저절로 뜹니다.{{else}}<b>이 창을 닫으면 tidoly stow 는 {{if eq system "windows"}}트레이{{else}}메뉴 막대{{end}}로 들어가 백그라운드에서 동작합니다.</b>{{if eq system "windows"}}트레이{{else}}메뉴 막대{{end}}의 tidoly stow 아이콘을 누르면 창을 다시 열 수 있습니다.{{end}}</div></div>
+<p><a class="button" href="/">설정 완료</a></p>
+</div></body></html>{{end}}
+
+{{define "connected-elsewhere"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{else}}<div class="notice">{{template "i" "check"}}<div><b>tidoly 에 연결했습니다.</b>tidoly stow 창으로 돌아가세요. 이 브라우저 창은 닫아도 됩니다.</div></div>{{end}}
+</div></body></html>{{end}}
+
+{{define "updating"}}{{template "head" .}}<div class="login" data-update data-from="{{.From}}">
+<h1>{{template "name"}}</h1>
+<h2>{{.From}} → {{.To}}</h2>
+<ol class="steps updating"><li class="on"><i>1</i><span>새 버전 받기</span></li><li><i>2</i><span>바꿔 넣기</span></li><li><i>3</i><span>다시 열기</span></li></ol>
+<p class="dim" data-say>새 버전을 받아 확인하고 있습니다. 바꿔 넣는 동안 tidoly stow 가 잠깐 꺼졌다가 다시 열립니다 — 그동안 휴대폰 백업도 잠깐 멈춥니다.</p>
+<a class="button" href="/admin" data-done hidden>관리로 돌아가기</a>
+</div></body></html>{{end}}
+
+{{define "owner-reset"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>
+<h2>관리자 비밀번호 변경</h2>
+<p class="dim">이 PC 의 tidoly stow 메뉴에서 연 링크입니다. <b>{{.Email}}</b> 의 새 비밀번호를 정하면 바로 로그인합니다. 이 링크는 한 번만, 10분 안에만 쓸 수 있습니다.</p>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+<form method="post" action="/owner/reset" class="stack"><input type="hidden" name="t" value="{{.Token}}">
+<label>새 비밀번호 <span class="dim">— 네 글자 이상</span><input name="password" type="password" autocomplete="new-password" minlength="4" required autofocus></label>
+<label>새 비밀번호 한 번 더<input name="again" type="password" autocomplete="new-password" minlength="4" required></label>
+<button class="button">정하고 들어가기</button></form>
+</div></body></html>{{end}}
+
+{{define "setup"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+<p class="dim">처음 오셨습니다. 이 서버의 주인이 될 계정을 만듭니다. 이 계정은 이 PC 에만 저장됩니다.</p>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+<form method="post" action="/setup" class="stack">
+<label>이름<input name="name" value="{{.Name}}" maxlength="100" autocomplete="name" required autofocus></label>
+<label>로그인 주소 <span class="dim">— 구글 메일 주소를 쓰세요. 폰 앱에도 이것을 넣고, 나중에 밖에서도 쓰도록 tidoly 로그인으로 바꿀 때 같은 사람으로 이어집니다</span><input name="email" type="email" value="{{.Email}}" autocomplete="username" required></label>
+<label>비밀번호 <span class="dim">— 네 글자 이상</span><input name="password" type="password" autocomplete="new-password" minlength="4" required></label>
+<label>비밀번호 한 번 더<input name="again" type="password" autocomplete="new-password" minlength="4" required></label>
+<button class="button">시작하기</button></form>
+</div></body></html>{{end}}
+
+{{define "drop-here"}}<button type="button" class="drop-here" data-pick>{{template "i" "upload"}}<b>사진이나 동영상을 여기에 끌어다 놓거나, 눌러서 고르세요</b><span>{{.}}</span></button>{{end}}
+
+{{define "timeline"}}{{template "head" .}}{{template "nav" .}}<main class="timeline"{{with .Query}} data-query="{{.}}"{{end}}>
+{{if .Narrowed}}{{if eq .Tab "places"}}<p class="up"><a href="/places">장소</a>{{range .Up}} › <a href="{{.Link}}">{{.Name}}</a>{{end}}</p>{{end}}
+<h1>{{.Title}} <small>{{.Total}}장</small></h1>
+{{with .Person}}<div class="tools"><form method="post" action="/people/{{.ID}}/name"><input name="name" value="{{.Name}}" placeholder="이름" maxlength="100" autocomplete="off"> <button class="button quiet">이름 저장</button></form>
+<form method="post" action="/people/{{.ID}}/hide">{{if .Hidden}}<input type="hidden" name="show" value="1"><button class="button quiet">다시 보이기</button>{{else}}<button class="button quiet">이 인물 숨기기</button>{{end}}</form></div>
+<p class="dim">이름을 붙이면 폰 앱의 인물에도 나타납니다. 사람이 아닌 것(인형 · 그림)이나 모르는 사람은 숨기면 됩니다 — 사진은 그대로 있습니다.</p>{{end}}
+{{if not .Months}}{{if .Upload}}{{template "drop-here" "여기서 올린 사진은 이 앨범에 들어갑니다."}}{{else}}<p class="empty">사진이 없습니다.</p>{{end}}{{end}}{{else if eq .Show "videos"}}<h1>동영상 <small>{{.Total}}개</small></h1>
+{{if not .Months}}{{template "drop-here" "폰에서 백업한 동영상도 여기에 모입니다."}}{{end}}{{else}}
+<div class="tabs"><a href="/"{{if not .Show}} aria-current="page"{{end}}>전체</a><a href="/?show=mine"{{if eq .Show "mine"}} aria-current="page"{{end}}>내 사진</a><a href="/?show=shared"{{if eq .Show "shared"}} aria-current="page"{{end}}>공유 사진</a><a href="/?show=favorites"{{if eq .Show "favorites"}} aria-current="page"{{end}}>즐겨찾기</a></div>
+{{if .Where}}<div class="who-row"><a href="/{{if .Show}}?show={{.Show}}{{end}}"{{if not .At}} aria-current="page"{{end}}>모든 위치</a>{{range .Where}}<a class="plain" href="/?show=mine&amp;at={{.ID}}"{{if eq $.At .ID}} aria-current="page"{{end}}>{{template "i" "disk"}}{{.Name}} <small>{{.Count}}</small></a>{{end}}</div>{{end}}
+{{if .Sharers}}<div class="who-row"><a href="/?show=shared"{{if not .By}} aria-current="page"{{end}}>모두</a>{{range .Sharers}}<a href="/?show=shared&amp;by={{.ID}}"{{if eq $.By .ID}} aria-current="page"{{end}}><i class="t{{.Tone}}">{{.Initial}}</i>{{.Name}} <small>{{.Count}}</small></a>{{end}}</div>{{end}}
+{{if not .Months}}{{if eq .Show "shared"}}{{template "drop-here" "여기서 올린 사진은 바로 공유됩니다 — 이 서버를 쓰는 모든 사람이 봅니다. 있는 사진은 고르고 \"공유하기\" 를 누르세요."}}
+{{else if eq .Show "favorites"}}{{template "drop-here" "여기서 올린 사진은 바로 즐겨찾기에 들어갑니다. 있는 사진은 열어 하트를 누르세요."}}
+{{else}}{{template "drop-here" "폰의 Immich 앱으로 백업해도 여기에 모입니다."}}{{end}}{{end}}{{end}}
+{{range .Months}}<section data-month="{{.Key}}" data-count="{{.Count}}" aria-label="{{.Label}}"><div class="days"></div></section>{{end}}
+</main>{{if .Months}}<div class="years" aria-label="연도"></div>{{end}}{{template "foot" .}}{{end}}
+
+{{define "coupons"}}{{template "head" .}}{{template "nav" .}}<main class="coupons">
+<h1>{{.Title}} <small>{{.Total}}장</small></h1>
+<p class="dim">유효기간이 가까운 것부터, 유효기간을 모르는 것은 그 뒤에 놓았습니다. 기간이 지난 쿠폰은 아래에 접어 두었습니다. 쿠폰이 아닌 것은 앨범에서 빼면 다시 들어오지 않습니다.</p>
+{{if .Valid}}{{template "days" .Valid}}{{else}}<p class="empty">쓸 수 있는 쿠폰이 없습니다.</p>{{end}}
+{{if .Past}}<details class="past"><summary>지난 쿠폰 {{.PastCount}}장</summary>{{template "days" .Past}}</details>{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "trash"}}{{template "head" .}}{{template "nav" .}}<main class="trash">
+<h1>휴지통 <small>{{.Count}}</small></h1>
+<p class="dim">지운 사진은 여기에 {{.Days}}일 동안 있다가 <b>완전히 지워집니다</b>. 그 전에는 언제든 복원할 수 있고, 그동안 파일은 디스크에 그대로 있습니다. 등록한 기존 사진 폴더의 사진은 완전히 지워도 원본 파일이 그 폴더에 남고, tidoly stow 에서만 빠집니다.</p>
+{{if not .Groups}}<p class="empty">휴지통이 비어 있습니다.</p>{{else}}
+<form class="tools" method="post" action="/trash"><button class="button quiet">모두 복원</button> <button class="button quiet danger" name="empty" value="1" data-confirm="휴지통의 사진을 모두 완전히 지울까요? 되돌릴 수 없습니다.">휴지통 비우기</button></form>
+{{template "days" .Groups}}{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "albums"}}{{template "head" .}}{{template "nav" .}}<main>
+<h1>앨범</h1>
+<form class="tools" method="post" action="/albums"><input name="name" placeholder="새 앨범 이름" maxlength="100" autocomplete="off" required> <button class="button quiet">{{template "i" "plus"}}<span>앨범 만들기</span></button></form>
+{{if not .Cards}}<p class="empty">앨범이 없습니다. 여기서 만들거나, 폰의 Immich 앱에서 만들면 나타납니다.</p>{{end}}
+<div class="cards">{{range .Cards}}<a href="{{.Link}}">{{if .Picture}}<img loading="lazy" alt="" src="{{.Picture}}">{{else}}<img alt="" src="/static/blank.gif">{{end}}<div>{{.Name}}</div><div class="dim">{{.Detail}}</div></a>{{end}}</div>
+</main>{{template "foot" .}}{{end}}
+
+{{define "picker"}}<h2>앨범에 넣기</h2>
+<form class="tools"><input name="name" placeholder="새 앨범 이름" maxlength="100" autocomplete="off" required> <button class="button quiet">만들어 넣기</button></form>
+<div class="list">{{range .}}<button data-album="{{slice .Link 8}}">{{if .Picture}}<img alt="" src="{{.Picture}}">{{else}}<img alt="" src="/static/blank.gif">{{end}}<span>{{.Name}}<br><small class="dim">{{.Detail}}</small></span></button>{{end}}</div>
+<button class="button quiet" data-act="cancel">취소</button>{{end}}
+
+{{define "places"}}{{template "head" .}}{{template "nav" .}}<main class="places">
+<h1>장소</h1>
+{{if not .Countries}}<p class="empty">위치가 기록된 사진이 없습니다.</p>{{else}}
+<div class="zoom"><span class="dim">넓게</span><input type="range" min="1" max="3" step="1" value="1" aria-label="묶는 단위"><span class="dim">자세히</span></div>
+<div class="stops"><span data-width="1">나라 <small>{{len .Countries}}</small></span><span data-width="2">시 · 도 <small>{{.States}}</small></span><span data-width="3">시 · 군 · 구 <small>{{.Cities}}</small></span></div>
+<div class="width" data-width="1"><div class="cards">{{range .Countries}}{{template "area" .}}{{end}}</div></div>
+<div class="width" data-width="2" hidden>{{range .Countries}}<section class="area"><h2><a href="{{.Link}}">{{.Name}}</a> <small>{{.Count}}장</small></h2>
+<div class="cards">{{range .Parts}}{{template "area" .}}{{end}}</div></section>{{end}}</div>
+<div class="width" data-width="3" hidden>{{range .Countries}}<section class="area"><h2><a href="{{.Link}}">{{.Name}}</a> <small>{{.Count}}장</small></h2>
+{{range .Parts}}<h3><a href="{{.Link}}">{{.Name}}</a> <small>{{.Count}}장</small></h3><div class="cards">{{range .Parts}}{{template "area" .}}{{end}}</div>{{end}}</section>{{end}}</div>{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "area"}}<a href="{{.Link}}"><img loading="lazy" alt="" src="{{.Picture}}"><div>{{.Name}}</div><div class="dim">{{with .Parts}}{{len .}}곳 · {{end}}{{.Count}}장</div></a>{{end}}
+
+{{define "people"}}{{template "head" .}}{{template "nav" .}}<main>
+<h1>{{if .Hidden}}숨긴 인물{{else}}인물{{end}}</h1>
+{{if not .Cards}}<p class="empty">{{if eq .Faces "on"}}아직 두 번 이상 나온 얼굴이 없습니다.{{else if eq .Faces "waiting"}}얼굴을 알아보는 모델을 받는 중입니다 — 다 받으면 사진을 차례로 살펴봅니다.{{else if eq .Faces "off"}}얼굴인식을 꺼 두었습니다 — 관리에서 켤 수 있습니다.{{else}}이 PC 에서는 얼굴인식을 쓸 수 없습니다 — 사진은 그대로 백업됩니다.{{end}}</p>{{end}}
+<div class="cards round">{{range .Cards}}<a href="{{.Link}}"><img loading="lazy" alt="" src="{{.Picture}}"><div>{{.Name}}</div><div class="dim">{{.Detail}}</div></a>{{end}}</div>
+{{if and (eq .Faces "on") (not .Hidden)}}<p class="dim">{{if .Lone}}한 번만 나온 얼굴 {{.Lone}}개는 아직 인물이 아닙니다. 같은 사람의 사진이 한 장 더 올라오면 인물이 됩니다.{{end}}
+{{if .Away}} <a href="/people?hidden=1">숨긴 인물 {{.Away}}</a>{{end}}</p>{{end}}
+{{if .Hidden}}<p><a href="/people">돌아가기</a></p>{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "status"}}{{template "head" .}}{{template "nav" .}}<main class="text">
+<h1>상태</h1>
+<h2>폰 연결</h2>
+<div class="phone-card"><img src="/welcome/qr.png" alt="서버 주소 QR" width="150" height="150"><div>
+<p>폰의 Immich 앱에서 서버 주소에 아래를 넣고 로그인합니다. 폰 카메라로 QR 을 찍으면 앱 설치와 주소 복사가 있는 안내가 폰에 열립니다. 가족에게는 "가족 안내 복사" 로 안내 글을 복사해 메신저로 보내세요 — 사람마다 로그인 주소까지 넣은 안내는 관리 → 사용자에 있습니다.</p>
+{{template "address" .Addr}}{{template "invite" .Invite}}
+<p class="dim">{{if .Addr.Outside}}"어디서나" 주소는 집 밖에서도 붙고 tidoly 로 로그인합니다.{{else}}폰이 이 PC 와 같은 와이파이에 있어야 합니다.{{end}} 자세한 것은 <a href="/help">도움말</a>.</p></div></div>
+{{if .LocationOff}}<div class="notice warn">{{template "i" "warn"}}<div><b>카메라의 위치 태그가 꺼져 있는 것 같습니다.</b>카메라로 찍은 사진 {{.Camera}}장 가운데 위치가 기록된 것이 없습니다. 위치는 찍을 때만 기록되고 나중에 되살릴 수 없습니다. 폰의 카메라 설정에서 위치 태그를 켜 주세요.</div></div>{{end}}
+<h2>저장 공간</h2>
+{{with .Disk}}<p>이 디스크 {{.Total}} 중 {{.Used}} 사용, {{.Free}} 남음</p><progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}
+<p>내 사진 · 영상 {{.Files}}개, {{.Size}}</p>
+<h2>뒤에서 하는 일</h2>
+<table><tr><th>일</th><th>기다림</th><th>하는 중</th><th>끝남</th><th>실패</th></tr>
+{{range .Jobs}}<tr><td>{{.Name}}</td><td>{{.Queued}}</td><td>{{.Running}}</td><td>{{.Done}}</td><td>{{.Failed}}</td></tr>{{end}}</table>
+{{if .Failures}}<h2>처리하지 못한 파일</h2>
+<table><tr><th>파일</th><th>일</th><th>이유</th></tr>{{range .Failures}}<tr><td>{{.Name}}</td><td>{{.Kind}}</td><td class="dim">{{.Error}}</td></tr>{{end}}</table>
+<p class="dim">파일 자체는 보관되어 있습니다.</p>{{end}}
+<p class="dim">지명: GeoNames (CC BY 4.0)</p>
+</main>{{template "foot" .}}{{end}}
+
+{{define "admin"}}{{template "head" .}}{{template "nav" .}}<main>
+<h1>관리</h1>
+{{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
+{{if eq .Updating "failed"}}<div class="notice warn">{{template "i" "warn"}}<div><b>업데이트하지 못했습니다.</b> 잠시 뒤에 다시 해 주세요.{{if .Newer}}<form method="post" action="/admin/update"><button class="button">다시 업데이트</button></form>{{end}}</div></div>
+{{else if .Updating}}<div class="notice">{{template "i" "info"}}<div><b>업데이트하는 중입니다.</b> <a href="/admin/update">진행 보기</a></div></div>
+{{else if .Newer}}<div class="notice">{{template "i" "info"}}<div><b>새 버전 {{.Newer}} 이 있습니다</b> (지금 {{.Version}}). {{if eq system "linux"}}이 PC 에서 설치 스크립트를 다시 실행하면 됩니다: <code>curl -fsSL https://raw.githubusercontent.com/tidoly-com/stow/main/scripts/stow-linux.sh | sudo sh</code>{{else if .Away}}업데이트는 집 안에서 합니다.{{else}}<form method="post" action="/admin/update"><button class="button">업데이트</button></form>업데이트하는 동안 tidoly stow 가 잠깐 꺼졌다가 다시 열립니다.{{end}}</div></div>{{end}}
+{{with .Arrivals}}<div class="notice">{{template "i" "info"}}<div><b>tidoly 로 처음 들어온 사람이 있습니다: {{.}}</b>모르는 사람이면 아래 사용자에서 그 사람의 tidoly 로그인을 막고, tidoly 에서도 빼 주세요. <form method="post" action="/admin/tidoly/seen"><button class="button quiet">확인했습니다</button></form></div></div>{{end}}
+{{with .Moved}}<div class="notice">{{template "i" "check"}}<div><b>이제 새 사진은 {{.}} 에 들어갑니다.</b>전에 올라온 사진은 원래 위치에 그대로 있고, 그대로 보입니다. 원래 위치로 돌리려면 아래 저장 위치에서 고르세요.</div></div>{{end}}
+<h2 class="with-act">저장 위치{{if not .Away}} <button type="button" class="icon" data-browse aria-label="위치 더하기" title="위치 더하기">{{template "i" "disk-plus"}}</button>{{end}}</h2>
+<p class="dim">사진과 설정파일이 올라가는 경로입니다.</p>
+<form class="rows" method="post" action="/admin/location" data-auto>
+{{range .Places}}<label class="row{{if .Current}} on{{end}}{{if .Missing}} off{{end}}"><input type="radio" name="location" value="{{.ID}}"{{if .Current}} checked{{end}}{{if .Missing}} disabled{{end}}><span class="ico">{{template "i" "disk"}}</span><span class="name"><b>{{.Name}}</b>{{if .Current}} <span class="tag">업로드 사진 저장 위치</span>{{end}}{{if .Missing}} <span class="tag warn">연결 안 됨</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span><span class="count">사진 · 영상 {{.Photos}}개<br><span class="dim">{{.Size}}</span>{{if .Mine}} · <a href="/?show=mine&amp;at={{or .ID "home"}}">내 사진 보기</a>{{end}}</span><span class="use">{{if .Missing}}디스크를 연결하면 다시 보입니다{{else if .Total}}{{.Total}} 중 {{.Free}} 남음<progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}</span></label>
+{{end}}</form>
+{{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{end}}
+<h2 class="with-act">기존 사진 폴더{{if not .Away}} <button type="button" class="icon" data-browse="import" aria-label="폴더 등록" title="폴더 등록">{{template "i" "folder-plus"}}</button>{{end}}</h2>
+<p class="dim">업로드 없이 이 장비의 사진을 인덱싱하여 봅니다. 외장USB등을 등록해놓고 연결하면 유용합니다.</p>
+{{if .Folders}}<div class="rows">
+{{range .Folders}}<div class="row folder{{if .Paused}} off{{end}}"{{if .Running}} data-running{{end}}><span class="ico">{{template "i" "folder"}}</span><span class="name"><b>{{.Name}}</b>{{if .Paused}} <span class="tag warn">꺼 둠</span>{{else if .Missing}} <span class="tag warn">연결 안 됨</span>{{end}}{{if .Running}} <span class="tag">훑는 중</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span><span class="count">{{.Owner}} 의 사진으로 · {{.Photos}}개{{if .Mine}} · <a href="/?show=mine&amp;at={{.ID}}">보기</a>{{end}}<br><span class="dim">{{if .Paused}}사진 목록에서 빠져 있습니다. 읽어 둔 것은 그대로 있어 켜면 바로 돌아옵니다{{else if .State}}{{.State}}{{else}}{{.Size}}{{end}}</span></span><span class="acts">{{if .Paused}}<form method="post" action="/admin/import/pause"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet">다시 켜기</button></form>{{else}}<form method="post" action="/admin/import/scan"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet"{{if or .Running .Missing}} disabled{{end}}>다시 훑기</button></form><form method="post" action="/admin/import/pause"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="on" value="1"><button class="button quiet"{{if .Running}} disabled{{end}}>잠시 끄기</button></form>{{end}}<form method="post" action="/admin/import/remove"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet danger" data-confirm="이 폴더의 등록을 풀까요? 사진이 목록에서 빠지고, 읽어 둔 정보와 작은 그림을 지웁니다 — 다시 등록하면 처음부터 읽습니다. 폴더의 파일은 그대로 남습니다. 나중에 다시 쓸 수도 있으면 '잠시 끄기' 를 쓰세요."{{if .Running}} disabled{{end}}>등록 풀기</button></form></span></div>
+{{end}}</div>{{end}}
+{{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{end}}
+<h2>연결 설정 <small class="dim">접속 위치</small></h2>
+{{template "outside-ways" .}}
+<h2>자동 앨범</h2>
+<div class="rows"><div class="row auto{{if eq .Faces "on"}} on{{else}} off{{end}}"><span class="ico">{{template "i" "people"}}</span><span class="name"><b>얼굴인식</b>{{if eq .Faces "on"}} <span class="tag">켜 둠</span>{{else if eq .Faces "waiting"}} <span class="tag">모델 받는 중</span>{{end}}<span>2번이상 나온 얼굴을 하나로 모아서 보게 합니다.</span></span>
+<span class="acts">{{if eq .Faces "none"}}<span class="dim">이 PC 에서는 쓸 수 없습니다</span>{{else if eq .Faces "waiting"}}<span class="dim">받는 중</span>{{else}}<form method="post" action="/admin/faces">{{if eq .Faces "on"}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form>{{end}}</span></div>
+<div class="row auto{{if .CouponsOn}} on{{else}} off{{end}}"><span class="ico">{{template "i" "album"}}</span><span class="name"><b>쿠폰인식</b>{{if .CouponsOn}} <span class="tag">켜 둠</span>{{end}}<span>바코드가 있는 스크린샷 · 저장한 그림을 쿠폰 앨범에 모읍니다.{{if not .CouponDays}} 유효기간은 맥에서만 읽습니다.{{end}}</span></span>
+<span class="acts"><form method="post" action="/admin/coupons">{{if .CouponsOn}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form></span></div></div>
+<h2 class="with-act" id="users">사용자 <button type="button" class="icon" data-act="add-user" aria-label="사용자 더하기" title="사용자 더하기">{{template "i" "person-plus"}}</button>{{if .Outside.Host}}<form class="switch" method="post" action="/admin/tidoly/auto" data-auto title="tidoly 에 등록한 계정을 바로 사용합니다. 꺼져 있으면 tidoly 에도 여기에도 메일 주소를 등록해야 합니다."><label><input type="checkbox" name="on" value="1" role="switch"{{if .Outside.AutoAdd}} checked{{end}}><span>tidoly 계정 바로 받기</span></label></form>{{end}}</h2>
+<p class="dim">이 시스템을 쓸 계정을 추가합니다. 추가된 사용자는 별도 저장공간을 가지며 공유하기를 통해 업로드된 사진을 함께 볼 수 있습니다.</p>
+<p class="mark">※ 구글 메일 주소로 등록해야 tidoly로그인 인증이 가능합니다.</p>
+<div class="rows users">
+{{range .Users}}{{$u := .}}<div class="row acct"><i class="av t{{.Tone}}">{{.Initial}}</i><span class="name"><b>{{.Name}}</b>{{if .Blocked}} <span class="tag warn">tidoly 로그인 막음</span>{{end}}<span>{{.Email}}</span><span class="dim">{{.Came}}</span></span>
+<span class="acts">{{if $.CanChoose}}<form method="post" action="/admin/location" data-auto><input type="hidden" name="user" value="{{.ID}}"><select name="location" aria-label="{{.Email}} 의 새 사진이 가는 곳" title="이 사람의 새 사진이 가는 곳"><option value="default">사진이 가는 곳: 기본</option>{{range $.Places}}{{if not .Missing}}<option value="{{or .ID "home"}}"{{if eq $u.Location (or .ID "home")}} selected{{end}}>{{.Path}}</option>{{end}}{{end}}</select></form>{{end}}
+<button type="button" class="button quiet" data-copy="{{.Invite}}" title="이 사람에게 보낼 안내 — Immich 설치 · 서버 주소 · 로그인 주소">{{template "i" "share"}}<span>안내 복사</span></button>
+{{if and $.Outside.Host (ne .Tone -1)}}<form method="post" action="/admin/users/block"><input type="hidden" name="user" value="{{.ID}}">{{if .Blocked}}<button class="button quiet">tidoly 로그인 풀기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet danger" data-confirm="이 사람의 tidoly 로그인을 막을까요? 밖에서 열어 둔 연결이 바로 끊깁니다. 집 안에서 비밀번호로는 그대로 들어옵니다.">tidoly 로그인 막기</button>{{end}}</form>{{end}}
+<details class="reset"><summary class="button quiet">비밀번호 새로 정하기</summary><form method="post" action="/admin/users/password"><input type="hidden" name="user" value="{{.ID}}"><input name="password" type="password" placeholder="새 비밀번호 (네 글자 이상)" minlength="4" autocomplete="new-password" required aria-label="{{.Email}} 의 새 비밀번호"> <button class="button quiet">저장</button></form></details></span></div>
+{{end}}<form class="row acct new" method="post" action="/admin/users" hidden><i class="av">{{template "i" "person-plus"}}</i><span class="fields"><input name="name" placeholder="이름" maxlength="100" autocomplete="off" required aria-label="이름"><input name="email" type="email" placeholder="로그인 주소 (구글 메일 주소)" autocomplete="off" required aria-label="로그인 주소"><input name="password" type="password" placeholder="비밀번호 (네 글자 이상)" minlength="4" autocomplete="new-password" required aria-label="비밀번호"></span><span class="acts"><button class="button">저장</button> <button type="button" class="button quiet" data-act="cancel-user">취소</button></span></form>
+</div>
+{{if .CanChoose}}<p class="dim">사진이 가는 곳을 "기본" 으로 둔 사람은 위의 저장 위치에서 고른 곳을 따릅니다. 고르면 바로 저장됩니다.</p>{{end}}
+</main>{{template "foot" .}}{{end}}
+
+{{define "folders"}}<header><h2>폴더 고르기</h2><button class="icon" data-act="cancel" aria-label="닫기">{{template "i" "close"}}</button></header>
+<div class="crumbs"><button data-at="">이 장비</button>{{range .Crumbs}}›<button data-at="{{.Path}}">{{.Name}}</button>{{end}}{{with .Free}}<span class="free">{{.}} 남음</span>{{end}}</div>
+<div class="list">{{range .Dirs}}<button data-at="{{.Path}}">{{template "i" "folder"}}<span>{{.Name}}</span>{{template "i" "next"}}</button>{{end}}
+{{if and .At (not .Dirs)}}<p class="empty">이 안에는 폴더가 없습니다.</p>{{end}}
+{{if .NoVolume}}<p class="empty">더할 수 있는 다른 디스크가 없습니다. 외장 디스크 등을 연결한 뒤 다시 눌러 주세요.</p>{{end}}</div>
+{{if .Import}}<form method="post" action="/admin/import">{{with .Next}}<input type="hidden" name="next" value="{{.}}">{{end}}{{if .At}}<div class="to">읽을 폴더: <b>{{.At}}</b> — 안쪽 폴더까지 읽습니다</div>{{if .System}}<p class="mark">※ 시스템 · 프로그램 폴더나 그 위(디스크 맨 위 · 홈 폴더)는 등록할 수 없습니다 — 브라우저 캐시 · 아이콘까지 들어옵니다. 사진이 든 폴더로 들어가 주세요.</p>{{end}}<input type="hidden" name="path" value="{{.At}}"><select name="user" aria-label="누구의 사진으로">{{range .Users}}<option value="{{.ID}}"{{if eq .ID $.Me}} selected{{end}}>{{if .Name}}{{.Name}}{{else}}{{.Email}}{{end}} 의 사진으로</option>{{end}}</select>{{else}}<div class="to">사진이 들어 있는 폴더를 골라 들어가세요.</div>{{end}}
+{{else}}<form method="post" action="/admin/locations">{{if .At}}<div class="to" data-at="{{.At}}" data-sep="{{.Sep}}">더할 위치: <b>{{.At}}</b></div><input type="hidden" name="path" value="{{.At}}">{{if .Used}}<p class="mark">※ 사진을 이미 두는 디스크입니다. 다른 디스크의 폴더를 골라 주세요.</p>{{else}}<input name="name" placeholder="새 폴더 이름 (비우면 이 폴더 그대로)" maxlength="100" autocomplete="off">{{end}}{{else if not .NoVolume}}<div class="to">디스크나 폴더를 골라 들어가세요.</div>{{end}}{{end}}
+<button type="button" class="button quiet" data-act="cancel">취소</button><button class="button"{{if or (not .At) .Used .System}} disabled{{end}}>이 폴더로</button></form>{{end}}
+
+{{define "photo"}}<div class="bar"><button class="icon" data-act="close" aria-label="닫기">{{template "i" "back"}}</button><span class="grow"></span>
+{{if .Asset.DeletedAt}}<button class="button quiet" data-act="restore" data-id="{{.Asset.ID}}">{{template "i" "restore"}}<span>복원</span></button>
+{{else if .Mine}}<button class="icon" data-act="favorite" data-id="{{.Asset.ID}}" aria-pressed="{{if .Asset.Favorite}}true{{else}}false{{end}}" aria-label="즐겨찾기">{{template "i" "heart"}}</button>
+<button class="icon" data-act="share" data-id="{{.Asset.ID}}" aria-pressed="{{if .Asset.Shared}}true{{else}}false{{end}}" aria-label="모두에게 공유">{{template "i" "share"}}</button>{{end}}
+{{if .Asset.Live}}<button class="button quiet live" data-act="live" aria-label="라이브 포토 재생">{{template "i" "play"}}<span>LIVE</span></button>{{end}}
+{{if ne .Asset.Type "VIDEO"}}<button class="icon" data-act="zoom" aria-label="확대">{{template "i" "zoom"}}</button>{{end}}
+<button class="icon" data-act="info" aria-label="정보">{{template "i" "info"}}</button>
+<a class="icon" href="/api/assets/{{.Asset.ID}}/original" download="{{.Asset.OriginalName}}" aria-label="원본 받기">{{template "i" "download"}}</a>
+{{if and .Mine (not .Asset.DeletedAt)}}<button class="icon" data-act="delete" data-id="{{.Asset.ID}}" aria-label="지우기">{{template "i" "trash"}}</button>{{end}}</div>
+<div class="stage"><button class="step" data-act="step" data-step="-1" aria-label="이전 사진">{{template "i" "prev"}}</button>{{if eq .Asset.Type "VIDEO"}}<video controls autoplay playsinline poster="/api/assets/{{.Asset.ID}}/thumbnail?size=preview" src="/api/assets/{{.Asset.ID}}/video/playback"></video>{{else}}<img alt="" draggable="false" src="/api/assets/{{.Asset.ID}}/thumbnail?size=preview"{{if .Full}} data-full="/api/assets/{{.Asset.ID}}/original"{{end}}>{{if .Asset.Live}}<video class="motion" playsinline preload="none" src="/api/assets/{{.Asset.Live}}/video/playback" hidden></video>{{end}}{{end}}<button class="step" data-act="step" data-step="1" aria-label="다음 사진">{{template "i" "next"}}</button></div>
+<aside class="info"><h2>정보</h2>
+<dl>{{if .By}}<dt>올린 사람</dt><dd>{{.By}}</dd>{{else if .Asset.Shared}}<dt>공유</dt><dd>이 서버를 쓰는 모든 사람이 봅니다</dd>{{end}}
+<dt>찍은 때</dt><dd>{{.When}}</dd>
+<dt>파일</dt><dd>{{.Asset.OriginalName}}<br><span class="dim">{{.Size}}{{with .Shape}} · {{.}}{{end}}{{if .Asset.Live}} · 라이브 포토{{end}}</span></dd>
+{{if .Camera}}<dt>기종</dt><dd>{{.Camera}}{{with .Shot}}<br><span class="dim">{{.}}</span>{{end}}</dd>{{end}}
+{{if .Where}}<dt>장소</dt><dd>{{if .Place}}<a href="/places?in={{.Place}}">{{.Where}}</a>{{else}}{{.Where}}{{end}}</dd>{{end}}
+{{if .People}}<dt>인물</dt><dd class="faces">{{range .People}}<a href="/people/{{.ID}}"><img alt="" src="/api/people/{{.ID}}/thumbnail">{{if .Name}}{{.Name}}{{else}}이름 없음{{end}}</a>{{end}}</dd>{{end}}
+{{if .Albums}}<dt>앨범</dt><dd>{{range $i, $b := .Albums}}{{if $i}}, {{end}}<a href="/albums/{{$b.ID}}">{{$b.Name}}</a>{{end}}</dd>{{end}}
+</dl></aside>{{end}}

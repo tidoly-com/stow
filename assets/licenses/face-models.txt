@@ -1,0 +1,18 @@
+tidoly stow 의 얼굴 도우미(bin/stow-faces)는 OpenCV 의 두 모델과 ONNX Runtime 으로 얼굴을 알아봅니다.
+사진과 얼굴은 이 PC 를 떠나지 않습니다.
+
+The face helper of tidoly stow (bin/stow-faces) uses two of OpenCV's models and ONNX Runtime.
+
+YuNet — 얼굴 찾기 / face detection
+  face_detection_yunet_2023mar.onnx, https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
+  MIT License, Copyright (c) 2020 Shiqi Yu — 전문 / full text: yunet-LICENSE
+  바꾼 것 / Modified: 입력 크기 표시(1x3x640x640)를 크기 없음으로 바꿨습니다 — the declared input size was made free.
+  도우미 안에 들어 있습니다 / carried inside the helper.
+
+SFace — 얼굴 특징 / face recognition
+  face_recognition_sface_2021dec.onnx, https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
+  Apache License 2.0 — 전문 / full text: sface-LICENSE
+  처음 실행할 때 사진 폴더의 .stow/models 에 받습니다 / fetched into .stow/models on first start, unmodified.
+
+ONNX Runtime — https://github.com/microsoft/onnxruntime
+  MIT License, Copyright (c) Microsoft Corporation — onnxruntime-LICENSE, onnxruntime-ThirdPartyNotices.txt

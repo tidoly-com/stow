@@ -1,0 +1,18 @@
+{
+ "configFile": false,
+ "duplicateDetection": false,
+ "email": false,
+ "facialRecognition": false,
+ "importFaces": false,
+ "map": false,
+ "oauth": false,
+ "oauthAutoLaunch": false,
+ "ocr": false,
+ "passwordLogin": false,
+ "realtimeTranscoding": false,
+ "reverseGeocoding": false,
+ "search": false,
+ "sidecar": false,
+ "smartSearch": false,
+ "trash": false
+}

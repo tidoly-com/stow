@@ -1,0 +1,7 @@
+/data/
+/tidoly-light
+*.exe
+dist/
+/.cache/
+__pycache__/
+/cmd/stow-install/payload.zip

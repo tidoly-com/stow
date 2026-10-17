@@ -1,0 +1,20 @@
+{
+ "avatarColor": "primary",
+ "clusterGroupId": "00000000-0000-4000-8000-000000000000",
+ "createdAt": "2026-01-01T00:00:00.000Z",
+ "deletedAt": null,
+ "email": "",
+ "id": "00000000-0000-4000-8000-000000000000",
+ "isAdmin": false,
+ "license": null,
+ "name": "",
+ "oauthId": "",
+ "profileChangedAt": "2026-01-01T00:00:00.000Z",
+ "profileImagePath": "",
+ "quotaSizeInBytes": null,
+ "quotaUsageInBytes": null,
+ "shouldChangePassword": false,
+ "status": "active",
+ "storageLabel": null,
+ "updatedAt": "2026-01-01T00:00:00.000Z"
+}

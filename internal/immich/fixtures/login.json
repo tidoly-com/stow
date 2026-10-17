@@ -1,0 +1,10 @@
+{
+ "accessToken": "",
+ "isAdmin": false,
+ "isOnboarded": false,
+ "name": "",
+ "profileImagePath": "",
+ "shouldChangePassword": false,
+ "userEmail": "",
+ "userId": "00000000-0000-4000-8000-000000000000"
+}

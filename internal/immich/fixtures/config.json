@@ -1,0 +1,14 @@
+{
+ "externalDomain": "",
+ "isInitialized": false,
+ "isOnboarded": false,
+ "loginPageMessage": "",
+ "maintenanceMode": false,
+ "mapDarkStyleUrl": "",
+ "mapLightStyleUrl": "",
+ "minFaces": 0,
+ "oauthButtonText": "",
+ "publicUsers": false,
+ "trashDays": 0,
+ "userDeleteDelay": 0
+}

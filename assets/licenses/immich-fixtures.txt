@@ -1,0 +1,12 @@
+tidoly stow 의 서버(tidoly-light)는 Immich 앱이 기대하는 응답 틀 몇 개를 담고 있습니다.
+
+The server of tidoly stow (tidoly-light) carries a few response shapes the Immich app expects
+(internal/immich/fixtures/ in the source).
+
+Immich — https://github.com/immich-app/immich
+  GNU Affero General Public License v3.0, Copyright (c) Immich contributors
+  이 틀들은 Immich 서버의 OpenAPI 명세에서 기계로 뽑았습니다 / extracted by machine from the Immich server's OpenAPI specification.
+  tidoly stow 도 AGPL-3.0 입니다 — 전문은 LICENSE / tidoly stow is AGPL-3.0 as well; full text in LICENSE.
+
+"Immich" 는 그 소유자의 이름입니다. tidoly stow 는 Immich 가 만들거나 보증한 것이 아닙니다.
+"Immich" is its owner's name; tidoly stow is not made or endorsed by Immich.

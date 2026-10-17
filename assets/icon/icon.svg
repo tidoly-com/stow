@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+  <linearGradient id="ink" x1="200" y1="840" x2="850" y2="200" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#1B6C8F"/><stop offset="0.6" stop-color="#3BA3A6"/><stop offset="1" stop-color="#A9DE8C"/>
+  </linearGradient>
+  <filter id="lift" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0B3B4A" flood-opacity="0.16"/></filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="#FFFFFF" filter="url(#lift)"/>
+<g transform="translate(512 512) scale(0.8) translate(-512 -488)" fill="none" stroke="url(#ink)" stroke-linecap="round" stroke-linejoin="round">
+  <g stroke-width="60">
+    <!-- the box's right side and lid, round the left into the S's upper bowl, down the middle -->
+    <path d="M 760 748 Q 812 730 834 704 Q 848 686 848 656 L 848 356 Q 848 318 814 300 L 562 160 Q 520 138 478 160 L 262 270 Q 180 312 178 400 Q 176 478 250 514 L 528 668"/>
+    <!-- the S's lower bowl, up into the front card -->
+    <path d="M 186 610 L 186 648 Q 186 690 226 708 L 466 818 Q 512 838 560 822 Q 652 790 688 706 Q 714 634 680 584 Q 652 544 602 522 L 398 428 Q 366 412 366 382 Q 366 346 402 346 L 598 346 Q 640 346 640 388 L 640 462"/>
+    <!-- the lid's front edge -->
+    <path d="M 614 516 L 846 406"/>
+  </g>
+  <g stroke-width="30">
+    <!-- the card behind -->
+    <path d="M 408 346 L 408 316 Q 408 284 440 284 L 664 284 Q 702 284 702 322 L 702 432"/>
+  </g>
+</g>
+</svg>

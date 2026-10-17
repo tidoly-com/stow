@@ -1,0 +1,78 @@
+#!/bin/sh
+#
+# tidoly stow 설치 (macOS) — scripts/release-mac.sh 가 이 틀에서 stow-macos.sh 를 만든다 (stow issue #18).
+#
+# 사용:  sh ~/Downloads/stow-macos.sh
+#
+# 브라우저로 받은 앱(.app)은 quarantine 표시가 붙어 Gatekeeper 에 막힌다 — 서명 · 공증이 없기 때문이다.
+# 이 스크립트는 tidoly 설치기(infra-all 의 paasctl-macos.sh.in)와 같은 길로 그것을 피한다:
+#   · 브라우저로 받은 .sh 에도 표시는 붙지만, `sh <파일>` 은 해석기가 읽는 것이라 검사 대상이 아니다.
+#   · 앱은 이 스크립트가 curl 로 받는다 — curl 은 quarantine 을 붙이지 않는다.
+# 서명이 없으므로 무결성은 체크섬이 책임진다. 안 맞으면 설치하지 않고, 건너뛰는 옵션도 두지 않는다.
+#
+# 앱은 /Applications 에 둔다(Finder 의 "응용 프로그램" 에 보이게). 사진 · 설정은 건드리지 않는다 —
+# 사진은 고객이 고른 폴더, 설정은 ~/Library/Application Support/tidoly-stow 에 있다.
+set -eu
+
+BASE="${STOW_BASE_URL:-@@BASE@@}"
+ASSET=tidoly-stow-macos.tar.gz
+APP_NAME=tidoly-stow.app
+
+say() { printf '%s\n' "$*"; }
+die() { printf '오류: %s\n' "$*" >&2; exit 1; }
+
+[ "$(uname -s)" = Darwin ] || die "macOS 용 설치 스크립트입니다"
+major="$(sw_vers -productVersion | cut -d. -f1)"
+[ "$major" -ge 13 ] 2>/dev/null || die "macOS 13 이상이 필요합니다 (지금 $(sw_vers -productVersion))"
+command -v curl >/dev/null 2>&1 || die "curl 이 필요합니다"
+
+# 관리자가 아닌 계정은 /Applications 에 쓸 수 없다 — 비밀번호를 묻는 대신 홈 아래의 응용 프로그램에 둔다.
+dir=/Applications
+[ -w "$dir" ] || dir="$HOME/Applications"
+mkdir -p "$dir" || die "설치할 폴더를 만들지 못했습니다: $dir"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+say "tidoly stow 설치"
+curl -fsSL -o "$tmp/$ASSET" "$BASE/$ASSET" || die "받지 못했습니다: $BASE/$ASSET"
+curl -fsSL -o "$tmp/SHA256SUMS" "$BASE/SHA256SUMS" || die "체크섬 파일을 받지 못했습니다 — 확인 없이는 설치하지 않습니다"
+sum="$(shasum -a 256 "$tmp/$ASSET" | cut -d' ' -f1)"
+want="$(grep " $ASSET\$" "$tmp/SHA256SUMS" | cut -d' ' -f1 | head -1)"
+[ -n "$want" ] || die "체크섬 목록에 $ASSET 이 없습니다"
+[ "$sum" = "$want" ] || die "체크섬이 맞지 않습니다 — 받은 파일을 버립니다
+  기대: $want
+  실제: $sum"
+say "  ✓ 받기 · 체크섬 확인"
+
+mkdir "$tmp/app"
+tar -xzf "$tmp/$ASSET" -C "$tmp/app" || die "풀지 못했습니다"
+[ -x "$tmp/app/$APP_NAME/Contents/MacOS/stow" ] || die "받은 파일 안에 앱이 없습니다"
+
+# 떠 있으면 끈다 — SIGTERM 을 받으면 서버가 DB 를 닫고 내려간다. 다 내려갈 때까지 기다린다.
+# -a: 앱의 업데이트 단추로 돌 때 이 스크립트는 그 앱의 자식이다 — macOS 의 pgrep · pkill 은 -a 없이는 조상을 빼고 찾는다.
+if pgrep -af "$APP_NAME/Contents/" >/dev/null 2>&1; then
+  say "  · 떠 있는 tidoly stow 를 끕니다"
+  pkill -TERM -af "$APP_NAME/Contents/MacOS/stow" 2>/dev/null || true
+  i=0
+  while pgrep -af "$APP_NAME/Contents/" >/dev/null 2>&1; do
+    i=$((i + 1))
+    # 껍데기가 먼저 꺼지고 서버가 남으면(SIGTERM 을 모르던 옛 앱) 서버에도 직접 청한다
+    if [ "$i" -eq 6 ] && ! pgrep -af "$APP_NAME/Contents/MacOS/stow" >/dev/null 2>&1; then
+      pkill -TERM -af "$APP_NAME/Contents/Resources/bin/tidoly-light" 2>/dev/null || true
+    fi
+    [ "$i" -le 30 ] || die "tidoly stow 가 꺼지지 않습니다 — 메뉴 막대에서 끝내기를 누른 뒤 다시 실행해 주세요"
+    sleep 0.5
+  done
+fi
+
+if [ -e "$dir/$APP_NAME" ]; then
+  rm -rf "$dir/$APP_NAME" || die "옛 앱을 지우지 못했습니다: $dir/$APP_NAME"
+fi
+mv "$tmp/app/$APP_NAME" "$dir/$APP_NAME" || die "앱을 옮기지 못했습니다"
+say "  ✓ 설치: $dir/$APP_NAME"
+
+# 처음이면 설치 화면이, 이미 쓰던 맥이면 사진 화면이 뜬다. 로그인할 때 저절로 뜨는 것은 앱이 처음 열릴 때 켠다.
+open "$dir/$APP_NAME"
+say ""
+say "tidoly stow 를 엽니다 — 메뉴 막대의 아이콘으로 다시 열 수 있습니다."
