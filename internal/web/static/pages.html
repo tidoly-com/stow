@@ -189,7 +189,12 @@
 {{define "install-connected"}}{{template "head" .}}<div class="setup">
 <h1>{{template "name"}}</h1>
 <p class="dim"><b>{{or .Name .Server}}</b> 의 사진을 엽니다…</p>
-<script>setTimeout(() => location.replace({{.Server}}), 1200);</script>
+<script>
+addEventListener("load", () => {
+  fetch("/install/started", { method: "POST" }).catch(() => {}); // all this page needs is here: the setup may end
+  setTimeout(() => location.replace({{.Server}}), 1200);
+});
+</script>
 </div></body></html>{{end}}
 
 {{define "install"}}{{template "head" .}}<div class="setup">
@@ -237,7 +242,10 @@
 <script>
 (() => {
   const wait = () => fetch("/install/state").then((r) => r.status === 404 ? location.replace("/") : setTimeout(wait, 500), () => setTimeout(wait, 500));
-  setTimeout(wait, 800);
+  addEventListener("load", () => { // all this page needs is here: the setup may end, and the photo server come up
+    fetch("/install/started", { method: "POST" }).catch(() => {});
+    setTimeout(wait, 800);
+  });
 })();
 </script>
 </div></body></html>{{end}}

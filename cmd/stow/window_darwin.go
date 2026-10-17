@@ -25,6 +25,11 @@ func showWindow(url string) {
 	w.SetSize(1200, 860, webview.HintNone)
 	C.fileDialogs(w.Window())
 	w.Bind("stowOpen", openOutside) // links that leave the server: the browser, not this window
-	w.Navigate(url)
+	if answers(url) {
+		w.Navigate(url)
+	} else { // the server is still coming up: say so, then go
+		w.SetHtml(loading)
+		go whenAnswers(url, func() { w.Dispatch(func() { w.Navigate(url) }) })
+	}
 	w.Run()
 }

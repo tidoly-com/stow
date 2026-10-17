@@ -36,6 +36,7 @@ type Install struct {
 	Find    func(context.Context) ([]nearby.Server, error) // the servers in the house; nil: look on the network
 
 	mu       sync.Mutex
+	ended    sync.Once
 	chosen   string
 	progress install.Progress
 	fetching bool
@@ -79,6 +80,7 @@ func (in *Install) Handler() http.Handler {
 	m.HandleFunc("GET /install/progress", in.report)
 	m.HandleFunc("POST /install/prepare", in.prepareAgain)
 	m.HandleFunc("POST /install/finish", in.finish)
+	m.HandleFunc("POST /install/started", in.started)
 	m.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) { http.Redirect(rw, r, "/install", http.StatusSeeOther) })
 	// No account exists yet to log in with, and the setup walks this machine's folders: at home only.
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -136,11 +138,23 @@ func (in *Install) connect(rw http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("install: this PC looks at %s (%s); no photo server here", address, name)
 	in.render(rw, "install-connected", map[string]any{"Step": 0, "Server": address, "Name": name})
-	if f, ok := rw.(http.Flusher); ok {
-		f.Flush()
-	}
-	go func() { time.Sleep(300 * time.Millisecond); in.Done() }()
+	in.leave()
 }
+
+// leave ends the setup once the last page is in the browser with all it loads — its stylesheet and
+// scripts come from this server too, and a slow machine had not fetched them before the server went
+// (2026-10-17). The page says so (started); without it, the setup ends after a while all the same.
+func (in *Install) leave() {
+	go func() { time.Sleep(15 * time.Second); in.end() }()
+}
+
+// started: the last page is loaded.
+func (in *Install) started(rw http.ResponseWriter, r *http.Request) {
+	rw.WriteHeader(http.StatusNoContent)
+	go func() { time.Sleep(100 * time.Millisecond); in.end() }()
+}
+
+func (in *Install) end() { in.ended.Do(in.Done) }
 
 // serverAddress makes what was typed into http://<host>:<port>, with stow's port when none is given.
 func serverAddress(typed string) string {
@@ -279,8 +293,5 @@ func (in *Install) finish(rw http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("install: photos go to %s; starting again as the photo server", chosen)
 	in.render(rw, "install-starting", map[string]any{"Step": 3})
-	if f, ok := rw.(http.Flusher); ok {
-		f.Flush()
-	}
-	go func() { time.Sleep(300 * time.Millisecond); in.Done() }()
+	in.leave()
 }

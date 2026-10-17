@@ -1,10 +1,12 @@
 package main
 
 import (
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 // The window is a process of its own — this program with --window — so that the menu bar or the tray
@@ -77,4 +79,39 @@ func openOutside(link string) {
 	if u, err := url.Parse(link); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" {
 		openURL(u.String())
 	}
+}
+
+// loading is what the window shows until the server answers — on a slow machine that takes a while, and
+// a window that does not come makes people start the app again (2026-10-17).
+const loading = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#fff;color:#64748b;
+font:15px -apple-system,"Segoe UI","Malgun Gothic",sans-serif}
+b{color:#0F766E;font-size:28px;letter-spacing:-.5px}b span{color:#64748b;font-weight:500;font-size:18px;margin-right:6px}
+i{width:28px;height:28px;border:3px solid #E6F7F4;border-top-color:#0F766E;border-radius:50%;animation:r .9s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+@media (prefers-color-scheme:dark){body{background:#0b1220;color:#94a3b8}b{color:#2DD4BF}i{border-color:#123F3B;border-top-color:#2DD4BF}}
+</style></head><body><b><span>tidoly</span>stow</b><i></i><p>사진 서버를 여는 중입니다…</p></body></html>`
+
+// answers says whether the tidoly stow at the page's address answers.
+func answers(page string) bool {
+	u, err := url.Parse(page)
+	if err != nil {
+		return false
+	}
+	c := http.Client{Timeout: time.Second}
+	res, err := c.Get(u.Scheme + "://" + u.Host + "/api/server/ping")
+	if err != nil {
+		return false
+	}
+	res.Body.Close()
+	return res.StatusCode == 200
+}
+
+// whenAnswers calls open once the server at the page's address answers.
+func whenAnswers(page string, open func()) {
+	for !answers(page) {
+		time.Sleep(300 * time.Millisecond)
+	}
+	open()
 }

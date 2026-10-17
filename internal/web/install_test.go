@@ -68,6 +68,15 @@ func TestInstallWritesTheChosenFolder(t *testing.T) {
 	if c, err := install.Load(config); err != nil || c.Data != in.Suggest {
 		t.Fatalf("settings: %+v %v", c, err)
 	}
+	select { // the page still loads what it needs from this server
+	case <-done:
+		t.Fatal("the setup ended before its last page said it was loaded")
+	case <-time.After(500 * time.Millisecond):
+	}
+	if res, err := client.Post(srv.URL+"/install/started", "", nil); err != nil || res.StatusCode != 204 {
+		t.Fatalf("started: %v %v", res, err)
+	}
+	client.Post(srv.URL+"/install/started", "", nil) // twice: the setup ends once
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -171,6 +180,7 @@ func TestInstallToLookAtAnotherPC(t *testing.T) {
 	if c, err := install.Load(config); err != nil || c.Server != stow.URL || c.Data != "" {
 		t.Fatalf("settings: %+v %v", c, err)
 	}
+	client.Post(srv.URL+"/install/started", "", nil) // the page, loaded
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

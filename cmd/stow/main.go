@@ -103,15 +103,15 @@ func main() {
 // serve runs the photo server here — or, before the setup is done, the setup — and opens its window.
 func serve(ctx context.Context, srv *server, quiet bool) {
 	go srv.keep(ctx)
+	if !quiet {
+		go openWindow() // at once: it says the server is coming up until it is
+	}
 	go func() {
-		if waitUp(30 * time.Second) {
+		if waitUp(2 * time.Minute) { // a slow machine's first start takes a while
 			if viewing() {
 				return // the setup made this PC one that only looks
 			}
 			firstLogin(filepath.Dir(srv.config))
-			if !quiet {
-				openWindowAt("/", true)
-			}
 		} else {
 			alert("tidoly stow 서버가 뜨지 않았습니다. 기록: " + srv.log)
 		}
