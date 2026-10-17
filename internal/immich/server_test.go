@@ -1882,9 +1882,9 @@ func TestASharedPhotoIsSeenByAllAndOwnedByOne(t *testing.T) {
 // and cache folders are passed over.
 func TestSystemFoldersAreNotRegistered(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	refused := []string{"/", home, filepath.Dir(home), filepath.Join(home, "Library", "Caches")}
+	refused := []string{"/", home, filepath.Dir(home)}
 	if runtime.GOOS == "darwin" {
-		refused = append(refused, "/System/Library", "/Applications")
+		refused = append(refused, filepath.Join(home, "Library", "Caches"), "/System/Library", "/Applications")
 	}
 	for _, dir := range refused {
 		if !systemFolder(dir) {
@@ -3050,7 +3050,11 @@ func TestTheHelpHasTheGuidesThePagesPointTo(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("help: %d", res.StatusCode)
 	}
-	for _, want := range []string{`<h3 id="vpn">`, `href="#vpn"`, `id="password"`, "관리자 비밀번호 변경", "Login with tidoly", "먼저 등록을 해제하세요", `id="outside"`, `href="/start/screen"`,
+	reset := "관리자 비밀번호 변경" // from the app's menu; Linux has no menu
+	if runtime.GOOS == "linux" {
+		reset = "tidoly-light -reset-owner"
+	}
+	for _, want := range []string{`<h3 id="vpn">`, `href="#vpn"`, `id="password"`, reset, "Login with tidoly", "먼저 등록을 해제하세요", `id="outside"`, `href="/start/screen"`,
 		`href="` + testHome + `/contact" target="_blank"`, `data-copy="tidoly stow test-1 · `} {
 		if !strings.Contains(help, want) {
 			t.Errorf("the help lacks %q", want)
