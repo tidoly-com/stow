@@ -407,6 +407,13 @@ html:has(dialog[open]) { overflow: hidden; } /* a layer open: it scrolls, the pa
 .help .toc a:hover { border-color: var(--primary); color: var(--primary); }
 .help [id] { scroll-margin-top: calc(var(--top) + 16px); }
 .help h3 { margin: 18px 0 6px; }
+.help .shots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; margin: 12px 0 18px; } /* captures: phones side by side, a wide screen on a row of its own */
+.help .shots figure { margin: 0; width: 180px; }
+.help .shots figure.wide { width: 100%; max-width: 720px; }
+.help .shots figure.tray { width: auto; max-width: 200px; }
+.help .shots img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); }
+.help .shots figcaption { margin-top: 6px; font-size: .75rem; line-height: 1.4; color: var(--muted-foreground); }
+@media (max-width: 600px) { .help .shots figure { width: calc(50% - 7px); } .help .shots figure.wide { width: 100%; } }
 .help h1 small { margin-left: 6px; }
 .help .ask-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 /* a license notice over the licenses page, read by scrolling, closed with ✕ or Esc (not .notice: that is the info box) */
