@@ -727,72 +727,7 @@ func (w *Web) album(rw http.ResponseWriter, r *http.Request, user store.User) {
 	}
 	data := w.frame(r.Context(), user, b.Name, "albums")
 	data["Album"], data["Bar"], data["Upload"] = b.ID, "album", true // photos uploaded here join the album
-	if b.Auto == "coupons" {
-		w.coupons(rw, r, data, user, b.ID)
-		return
-	}
 	w.narrowed(rw, r, data, user, store.Narrow{Album: b.ID}, "album="+url.QueryEscape(b.ID))
-}
-
-// coupons is the coupon album: the ones that can still be used first, the nearest last day first, grouped
-// by that day; then the ones whose day is not known; under them, folded, the ones whose day is past, the
-// latest first.
-func (w *Web) coupons(rw http.ResponseWriter, r *http.Request, data map[string]any, user store.User, albumID string) {
-	list, until, err := w.Store.AlbumCoupons(r.Context(), user.ID, albumID)
-	if err != nil {
-		w.fail(rw, err)
-		return
-	}
-	today := time.Now().Format(time.DateOnly)
-	day0, _ := time.Parse(time.DateOnly, today)
-	rank := func(day string) int { // still good, not known, past
-		switch {
-		case day >= today:
-			return 0
-		case day == "":
-			return 1
-		}
-		return 2
-	}
-	sort.SliceStable(list, func(i, j int) bool {
-		a, b := until[list[i].ID], until[list[j].ID]
-		if rank(a) != rank(b) {
-			return rank(a) < rank(b)
-		}
-		if a >= today {
-			return a < b
-		}
-		return a > b
-	})
-	all := cells(list, user.ID, nil)
-	var valid, past []day
-	pastCount := 0
-	for i, a := range list {
-		key := until[a.ID]
-		label := "유효기간 모름"
-		if at, err := time.Parse(time.DateOnly, key); err == nil {
-			left := int(at.Sub(day0).Hours() / 24)
-			switch {
-			case key < today:
-				label = at.Format("2006년 1월 2일") + "에 끝남"
-			case key == today:
-				label = "오늘까지"
-			default:
-				label = fmt.Sprintf("%s까지 · %d일 남음", at.Format("2006년 1월 2일"), left)
-			}
-		}
-		group := &valid
-		if key != "" && key < today {
-			group = &past
-			pastCount++
-		}
-		if n := len(*group); n == 0 || (*group)[n-1].Label != label {
-			*group = append(*group, day{Label: label})
-		}
-		(*group)[len(*group)-1].Cells = append((*group)[len(*group)-1].Cells, all[i])
-	}
-	data["Valid"], data["Past"], data["PastCount"], data["Total"] = valid, past, pastCount, len(list)
-	w.render(rw, "coupons", data)
 }
 
 func (w *Web) person(rw http.ResponseWriter, r *http.Request, user store.User) {

@@ -97,8 +97,6 @@ h2.with-act .icon { width: 32px; height: 32px; }
 .row.folder { grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1.3fr) auto; cursor: default; }
 .row.off .acts { color: var(--foreground); }
 .row.folder:hover { background: none; }
-.coupons .past { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 8px; }
-.coupons .past > summary { cursor: pointer; padding: 10px 0; color: var(--muted-foreground); font-weight: 600; }
 .row.auto { grid-template-columns: 40px minmax(0, 1fr) auto; cursor: default; }
 .row.auto:hover { background: none; }
 .row.auto .name > span:last-child, .row.auto .name > .desc { display: block; margin-top: 2px; color: var(--muted-foreground); font-family: inherit; font-size: .8125rem; line-height: 1.45; white-space: normal; }
