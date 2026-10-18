@@ -360,6 +360,7 @@
         clear();
       }
       if (act === "album") chooseAlbum(ids);
+      if (act === "link") makeLink({ id: ids });
     });
   }
 
@@ -382,6 +383,34 @@
     }, failed);
   });
   if (sheet) sheet.addEventListener("close", () => sheet.classList.remove("reading"));
+  // A shared link: made for the photos chosen or for an album, then shown with its address to copy.
+  const copyText = (text) => (navigator.clipboard && window.isSecureContext ? navigator.clipboard.writeText(text) : Promise.reject())
+    .catch(() => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok ? undefined : Promise.reject();
+    });
+  const makeLink = (fields) => {
+    post("/web/links", fields).then((r) => r.json()).then(({ url }) => {
+      sheet.innerHTML = '<header><h2>링크를 만들었습니다</h2><button type="button" class="icon" data-act="cancel" aria-label="닫기"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#close"/></svg></button></header>'
+        + '<div class="address"><code></code><button type="button" class="button" data-act="copy"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#copy"/></svg><span>주소 복사</span></button></div>'
+        + '<p class="dim">이 주소를 받은 사람은 로그인 없이 봅니다. 7일 뒤 닫히고, <a href="/links">공유 링크</a>에서 기한 · 비밀번호를 바꾸거나 닫을 수 있습니다.</p>';
+      sheet.querySelector("code").textContent = url;
+      sheet.querySelector("[data-act=cancel]").addEventListener("click", () => sheet.close());
+      const button = sheet.querySelector("[data-act=copy]");
+      button.addEventListener("click", () => copyText(url).then(() => { button.querySelector("span").textContent = "복사했습니다"; }, () => say("복사하지 못했습니다 — 주소를 길게 눌러 복사해 주세요")));
+      if (!sheet.open) sheet.showModal();
+      clear();
+    }, (status) => say(status === 409 ? "tidoly 에 연결해야 링크로 공유할 수 있습니다" : status === 400 ? "자신의 사진만 링크로 공유할 수 있습니다" : "링크를 만들지 못했습니다"));
+  };
+  document.querySelectorAll("[data-link-album]").forEach((b) => b.addEventListener("click", () => makeLink({ album: b.dataset.linkAlbum })));
+
   const chooseAlbum = (ids) => {
     fetch("/web/albums", { credentials: "same-origin" }).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then((html) => {
       sheet.innerHTML = html;

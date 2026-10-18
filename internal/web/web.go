@@ -91,7 +91,8 @@ type Web struct {
 	Trash        func(ctx context.Context, userID string, ids []string) error
 	Restore      func(ctx context.Context, userID string, ids []string) (int, error)
 	Empty        func(ctx context.Context, userID string) (int, error)
-	Days         int // how long the trash keeps a photo
+	Days         int       // how long the trash keeps a photo
+	Links        LinkFuncs // shared links (#13), while the tunnel is on
 	mux          *http.ServeMux
 }
 
@@ -133,6 +134,7 @@ type cell struct {
 	Live            bool   // a live photo: a few seconds of video go with it
 	By, ByName      string // whose it is — a letter and a name — when it is not the viewer's own
 	Tone            int    // that person's color
+	Key             string // on a shared link's page: the link's key, which lets its photos be fetched
 }
 
 type person struct {
@@ -243,7 +245,7 @@ func (w *Web) frame(ctx context.Context, user store.User, title, tab string) map
 	if me == "" {
 		me = user.Email
 	}
-	data := map[string]any{"Title": title, "Tab": tab, "User": user, "Me": initial(me), "Version": w.Version}
+	data := map[string]any{"Title": title, "Tab": tab, "User": user, "Me": initial(me), "Version": w.Version, "LinksOn": w.linksOn()}
 	dir := w.Dir // the disk shown is the one this person's next photo goes to
 	if id, err := w.Store.LocationFor(ctx, user.ID); err == nil && id != "" && w.LocationDir != nil && w.LocationDir(id) != "" {
 		dir = w.LocationDir(id)
@@ -297,6 +299,13 @@ func (w *Web) Handler(loginStart, logout http.HandlerFunc) http.Handler {
 	m.HandleFunc("GET /auth/start", loginStart)
 	m.HandleFunc("POST /logout", logout)
 	m.HandleFunc("GET /{$}", w.page(w.timeline))
+	m.HandleFunc("GET /share/{key}", w.sharePage)
+	m.HandleFunc("POST /share/{key}", w.sharePage)
+	m.HandleFunc("GET /share/{key}/{id}", w.sharePhoto)
+	m.HandleFunc("POST /web/links", w.page(w.linkMake))
+	m.HandleFunc("GET /links", w.page(w.linksPage))
+	m.HandleFunc("POST /links/{id}", w.page(w.linkChange))
+	m.HandleFunc("POST /links/{id}/delete", w.page(w.linkChange))
 	m.HandleFunc("GET /web/month/{month}", w.page(w.month))
 	m.HandleFunc("GET /web/events", w.page(w.events))
 	m.HandleFunc("GET /web/photo/{id}", w.page(w.photo))

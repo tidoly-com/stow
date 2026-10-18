@@ -183,7 +183,8 @@ func main() {
 	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, Changed: api.Changed, Events: api.WebEvents,
 		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
-		TidolyHere: api.TidolyHere, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
+		TidolyHere: api.TidolyHere,
+		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashLinkPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
 		SetAutoAdd: api.SetAutoAdd, Block: api.Block, Arrivals: api.Arrivals, SeenArrivals: api.SeenArrivals,
 		Contact:   *homeURL + "/contact",
 		AddFolder: api.AddFolder, PauseFolder: api.PauseFolder, ScanFolder: api.ScanFolder, RemoveFolder: api.RemoveFolder, FolderState: folderState(api), Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: immich.TrashDays}

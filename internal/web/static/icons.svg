@@ -18,6 +18,7 @@
 <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 <symbol id="warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.500"/></symbol>
 <symbol id="share" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.500"/><path d="M2.500 20c0-3.500 3-5.500 6.500-5.500s6.500 2 6.500 5.500"/><circle cx="17.500" cy="9" r="2.500"/><path d="M17.500 14c2.500 0 4.500 1.500 4.500 4.500"/></symbol>
+<symbol id="link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 005.660 0l3-3a4 4 0 00-5.660-5.660l-1 1"/><path d="M14 10a4 4 0 00-5.660 0l-3 3a4 4 0 005.660 5.660l1-1"/></symbol>
 <symbol id="zoom" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.500"/><path d="M16 16l4.500 4.500M11 8.500v5M8.500 11h5"/></symbol>
 <symbol id="admin" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.500"/><circle cx="10" cy="17" r="2.500"/></symbol>
 <symbol id="folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>

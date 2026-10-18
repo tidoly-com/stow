@@ -156,6 +156,23 @@ CREATE TABLE IF NOT EXISTS memory_assets (
 	seq       INTEGER NOT NULL,
 	PRIMARY KEY (memory_id, asset_id)
 );
+CREATE TABLE IF NOT EXISTS shared_links (  -- an address for someone without an account: one album, or some photos
+	id             TEXT PRIMARY KEY,
+	key            TEXT NOT NULL UNIQUE,     -- the secret in the address
+	owner_id       TEXT NOT NULL REFERENCES users(id),
+	album_id       TEXT REFERENCES albums(id), -- the album shown; NULL for photos chosen one by one
+	description    TEXT NOT NULL DEFAULT '',
+	password       TEXT NOT NULL DEFAULT '', -- a hash; '' for none
+	expires_at     TEXT,                     -- NULL for never
+	allow_download INTEGER NOT NULL DEFAULT 1,
+	show_metadata  INTEGER NOT NULL DEFAULT 1,
+	created_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shared_link_assets (
+	link_id  TEXT NOT NULL REFERENCES shared_links(id),
+	asset_id TEXT NOT NULL REFERENCES assets(id),
+	PRIMARY KEY (link_id, asset_id)
+);
 CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT OR IGNORE INTO counters VALUES ('seq', 0);
 `
@@ -2055,8 +2072,12 @@ func (s *Store) DeleteAlbum(ctx context.Context, ownerID, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM album_assets WHERE album_id IN (SELECT id FROM albums WHERE owner_id = ? AND id = ?)`, ownerID, id); err != nil {
-		return err
+	for _, q := range []string{`DELETE FROM shared_link_assets WHERE link_id IN (SELECT id FROM shared_links WHERE album_id IN (SELECT id FROM albums WHERE owner_id = ? AND id = ?))`,
+		`DELETE FROM shared_links WHERE album_id IN (SELECT id FROM albums WHERE owner_id = ? AND id = ?)`, // its links go with it
+		`DELETE FROM album_assets WHERE album_id IN (SELECT id FROM albums WHERE owner_id = ? AND id = ?)`} {
+		if _, err := tx.ExecContext(ctx, q, ownerID, id); err != nil {
+			return err
+		}
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM albums WHERE owner_id = ? AND id = ?`, ownerID, id)
 	if err != nil {
@@ -2393,7 +2414,7 @@ func (s *Store) DeleteAsset(ctx context.Context, ownerID, assetID string) (Remov
 		return out, err
 	}
 	for _, q := range []string{`DELETE FROM album_assets WHERE asset_id = ?`, `DELETE FROM asset_exif WHERE asset_id = ?`, `DELETE FROM coupons WHERE asset_id = ?`, `DELETE FROM memory_assets WHERE asset_id = ?`,
-		`DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
+		`DELETE FROM shared_link_assets WHERE asset_id = ?`, `DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
 		if _, err := tx.ExecContext(ctx, q, assetID); err != nil {
 			return out, err
 		}

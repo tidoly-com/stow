@@ -435,3 +435,29 @@ html:has(dialog[open]) { overflow: hidden; } /* a layer open: it scrolls, the pa
 .vpn-devices li > span { min-width: 140px; }
 .vpn-devices details[open] img { display: block; margin-top: 8px; background: #fff; padding: 8px; border-radius: var(--radius); }
 @media (max-width: 720px) { .vpn-detail { padding-left: 16px; } }
+
+/* Shared links: the page someone without an account opens, one photo of it, and the person's own list. */
+.share-top { justify-content: flex-start; }
+main.share { padding-top: 8px; }
+main.share h1 + .dim { margin-top: -4px; margin-bottom: 18px; }
+.share-foot { padding: 28px 16px 36px; text-align: center; font-size: .8125rem; }
+.share-foot a { color: var(--muted-foreground); }
+.share-foot b { color: var(--primary); font-weight: 600; }
+.share-one { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; background: #000; color: #fff; }
+.share-one .bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+.share-one .bar .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; opacity: .85; }
+.share-one .bar .icon, .share-one .bar .button { color: #fff; }
+.share-one .stage { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.share-one .stage img, .share-one .stage video { max-width: 100%; max-height: calc(100dvh - 120px); object-fit: contain; }
+.share-one .step { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; padding: 12px; border-radius: 50%; background: rgba(0,0,0,.4); color: #fff; }
+.share-one .step.next { left: auto; right: 8px; }
+.share-one .step .i { width: 24px; height: 24px; }
+.share-one .meta { margin: 0; padding: 10px 16px 16px; font-size: .8125rem; opacity: .8; text-align: center; }
+.address { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.address code { flex: 1 1 260px; min-width: 0; padding: 10px 12px; border-radius: var(--radius); background: var(--muted); overflow-wrap: anywhere; font-size: .8125rem; }
+.links .link-row { max-width: 720px; padding: 16px 0; border-top: 1px solid var(--border); }
+.links .link-row .head small { display: inline-block; margin-top: 2px; }
+.links .link-row .gone { color: var(--destructive, #b91c1c); }
+.links details summary { cursor: pointer; color: var(--primary); font-size: .875rem; margin-top: 6px; }
+.links details form { margin-top: 12px; }
+.links .check { display: flex; align-items: center; gap: 8px; }

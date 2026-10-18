@@ -136,7 +136,8 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 			}
 			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load()}, true
 		},
-		Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: TrashDays}
+		Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: TrashDays,
+		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashLinkPassword}}
 	api.Pages(pages.Handler(api.WebLoginStart, api.WebLogout))
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)

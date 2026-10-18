@@ -343,16 +343,7 @@ func parseTime(value string, fallback time.Time) time.Time {
 	return fallback
 }
 
-func (s *Server) serveOriginal(w http.ResponseWriter, r *http.Request, sess session) {
-	asset, err := s.store.AssetFor(r.Context(), sess.user.ID, r.PathValue("id")) // one's own, or one that is shared
-	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, 404, "Not found") // also the answer for someone else's photo
-		return
-	}
-	if err != nil {
-		writeError(w, 500, "Internal error")
-		return
-	}
+func (s *Server) serveOriginal(w http.ResponseWriter, r *http.Request, asset store.Asset) {
 	f, err := s.lib.Open(asset.Location, asset.Path)
 	if err != nil {
 		log.Printf("serve: %s is recorded but missing on disk: %v", asset.Path, err)
@@ -369,16 +360,7 @@ func (s *Server) serveOriginal(w http.ResponseWriter, r *http.Request, sess sess
 
 // serveThumbnail sends a small picture made earlier by the thumbnail job. It never makes one: a request
 // that arrives before the job has run gets the original (a photo) or a blank (a video) instead.
-func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, sess session) {
-	asset, err := s.store.AssetFor(r.Context(), sess.user.ID, r.PathValue("id")) // one's own, or one that is shared
-	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, 404, "Not found")
-		return
-	}
-	if err != nil {
-		writeError(w, 500, "Internal error")
-		return
-	}
+func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset store.Asset) {
 	sizes := []string{"thumbnail"}
 	if size := r.URL.Query().Get("size"); size == "preview" || size == "fullsize" {
 		sizes = []string{"preview", "thumbnail"}
@@ -399,7 +381,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, sess ses
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store") // stands in for the small picture until it is made; a browser that cannot show it (HEIC) must ask again
-	s.serveOriginal(w, r, sess)
+	s.serveOriginal(w, r, asset)
 }
 
 // MakeThumbnail is the "thumbnail" job: make the small pictures, then tell the person's devices that the
@@ -620,13 +602,18 @@ func (s *Server) assetInfo(w http.ResponseWriter, r *http.Request, sess session)
 		writeError(w, 500, "Internal error")
 		return
 	}
+	writeJSON(w, 200, assetResponse(asset))
+}
+
+// assetResponse is AssetResponseDto.
+func assetResponse(asset store.Asset) map[string]any {
 	body := assetData(asset)
 	delete(body, "deletedAt")
 	delete(body, "stackId")
 	body["originalMimeType"], body["originalPath"], body["updatedAt"] = mimeOf(asset.OriginalName), asset.Path, asset.CreatedAt
 	body["hasMetadata"], body["isArchived"], body["isOffline"], body["isTrashed"] = asset.Meta != nil, false, false, asset.DeletedAt != ""
 	body["duplicateId"], body["stack"], body["people"], body["tags"] = nil, nil, []any{}, []any{}
-	writeJSON(w, 200, body)
+	return body
 }
 
 // mimeOf names the type of a file by its name, including the kinds phones make that Go does not know.

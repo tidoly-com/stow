@@ -13,7 +13,7 @@
 {{if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
 <details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
 <div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
-<a href="/status">폰 연결 · 상태</a><a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
+<a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a><a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
 <div class="theme" role="group" aria-label="화면"><span>화면</span><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">밝게</button><button type="button" data-theme-set="dark">어둡게</button></div>
 <form method="post" action="/logout"><button>로그아웃</button></form>
 </div></details>
@@ -24,6 +24,7 @@
 {{else}}<button class="button quiet own" data-act="favorite">{{template "i" "heart"}}<span>즐겨찾기</span></button>
 <button class="button quiet own" data-act="share">{{template "i" "share"}}<span>공유하기</span></button>
 <button class="button quiet own" data-act="album">{{template "i" "album"}}<span>앨범에</span></button>
+{{if .LinksOn}}<button class="button quiet own" data-act="link">{{template "i" "link"}}<span>링크</span></button>{{end}}
 {{if eq .Bar "album"}}<button class="button quiet own" data-act="unalbum"><span>앨범에서 빼기</span></button>{{end}}
 <button class="button quiet" data-act="download">{{template "i" "download"}}<span>받기</span></button>
 <button class="button quiet danger own" data-act="delete">{{template "i" "trash"}}<span>지우기</span></button>{{end}}
@@ -47,6 +48,56 @@
 {{define "foot"}}<dialog class="viewer" tabindex="-1"></dialog><dialog class="sheet"></dialog><div class="toast" role="status" hidden></div><script src="/static/app.js"></script></body></html>{{end}}
 
 {{define "cells"}}{{range .}}<a href="/api/assets/{{.ID}}/thumbnail?size=preview" data-photo="{{.ID}}"{{if .W}} data-w="{{.W}}" data-h="{{.H}}"{{end}} class="{{if .Video}}video {{end}}{{if .Favorite}}fav {{end}}{{if .Shared}}shared {{end}}{{if .By}}theirs{{end}}"><img loading="lazy" alt="" src="/api/assets/{{.ID}}/thumbnail"><i class="pick">{{template "i" "check"}}</i>{{if .Video}}<span class="len">{{template "i" "play"}}{{.Length}}</span>{{else if .Live}}<span class="len live">LIVE</span>{{end}}{{if .By}}<span class="by t{{.Tone}}" title="{{.ByName}} 님이 공유">{{.By}}</span>{{else}}<i class="act heart" data-quick="favorite" title="즐겨찾기">{{template "i" "heart"}}</i><i class="act share" data-quick="share" title="모두에게 공유">{{template "i" "share"}}</i>{{end}}</a>{{end}}{{end}}
+
+{{define "share-cells"}}{{range .}}<a href="/share/{{.Key}}/{{.ID}}"{{if .W}} data-w="{{.W}}" data-h="{{.H}}"{{end}}{{if .Video}} class="video"{{end}}><img loading="lazy" alt="" src="/api/assets/{{.ID}}/thumbnail?key={{.Key}}">{{if .Video}}<span class="len">{{template "i" "play"}}{{.Length}}</span>{{else if .Live}}<span class="len live">LIVE</span>{{end}}</a>{{end}}{{end}}
+
+{{define "share-foot"}}<footer class="share-foot"><a href="{{.Source}}" target="_blank" rel="noopener"><b>tidoly stow</b> 로 공유됨 · 내 사진도 집 PC 에 보관하기</a></footer>{{end}}
+
+{{define "share"}}{{template "head" .}}<header class="top share-top"><span class="brand">{{template "name"}}</span></header>
+<main class="timeline share">
+<h1>{{.Title}} <small>{{.Total}}장</small></h1>
+<p class="dim">{{with .Owner}}{{.}} 님이 공유했습니다{{end}}{{with .Until}} · {{.}} 열립니다{{end}}{{if .Download}} · 사진을 열어 원본을 받을 수 있습니다{{end}}</p>
+{{range .Days}}<div class="day"><h3>{{.Label}}</h3><div class="flow">{{template "share-cells" .Cells}}</div></div>{{else}}<p class="empty">보여 줄 사진이 없습니다.</p>{{end}}
+</main>{{template "share-foot" .}}<script src="/static/app.js"></script></body></html>{{end}}
+
+{{define "share-photo"}}{{template "head" .}}<main class="share-one">
+<div class="bar"><a class="icon" href="/share/{{.Key}}" aria-label="목록으로">{{template "i" "back"}}</a><span class="grow">{{.Title}} · {{.Index}} / {{.Total}}</span>{{if .Download}}<a class="button quiet" href="/api/assets/{{.Asset.ID}}/original?key={{.Key}}" download>{{template "i" "download"}}<span>원본 받기</span></a>{{end}}</div>
+<div class="stage">{{with .Prev}}<a class="step" href="/share/{{$.Key}}/{{.}}" aria-label="이전 사진">{{template "i" "prev"}}</a>{{end}}{{if .Video}}<video controls autoplay playsinline poster="/api/assets/{{.Asset.ID}}/thumbnail?size=preview&amp;key={{.Key}}" src="/api/assets/{{.Asset.ID}}/video/playback?key={{.Key}}"></video>{{else}}<img alt="" src="/api/assets/{{.Asset.ID}}/thumbnail?size=preview&amp;key={{.Key}}">{{end}}{{with .Next}}<a class="step next" href="/share/{{$.Key}}/{{.}}" aria-label="다음 사진">{{template "i" "next"}}</a>{{end}}</div>
+{{if or .When .Where .Camera}}<p class="meta">{{.When}}{{with .Where}} · {{.}}{{end}}{{with .Camera}} · {{.}}{{end}}</p>{{end}}
+</main></body></html>{{end}}
+
+{{define "share-password"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>
+<h2>비밀번호를 넣어 주세요</h2>
+<p class="dim">공유한 사람이 이 링크에 비밀번호를 걸어 두었습니다.</p>
+{{if .Wrong}}<div class="notice warn">{{template "i" "warn"}}<div>비밀번호가 맞지 않습니다. 여러 번 틀리면 잠시 기다려야 합니다.</div></div>{{end}}
+<form method="post" action="/share/{{.Key}}" class="stack"><label>비밀번호<input name="password" type="password" autocomplete="off" required autofocus></label><button class="button">열기</button></form>
+</div></body></html>{{end}}
+
+{{define "share-gone"}}{{template "head" .}}<div class="login">
+<h1>{{template "name"}}</h1>
+<h2>이 링크는 열 수 없습니다</h2>
+<p class="dim">기한이 지났거나, 공유한 사람이 링크를 닫았습니다. 다시 보려면 공유한 사람에게 새 링크를 부탁해 주세요.</p>
+</div>{{template "share-foot" .}}</body></html>{{end}}
+
+{{define "links"}}{{template "head" .}}{{template "nav" .}}<main class="text links">
+<h1>공유 링크</h1>
+<p class="dim">계정이 없는 사람에게 사진을 보여 주는 주소입니다. 사진을 고르거나 앨범 안에서 "링크" 를 누르면 만들어지고, 받은 사람은 로그인 없이 봅니다. 기본으로 7일 뒤 닫힙니다.</p>
+{{if not .On}}<div class="notice warn">{{template "i" "warn"}}<div>tidoly 에 연결되어 있지 않아 지금은 링크가 열리지 않습니다 — 관리 → 연결 설정 → internet.</div></div>{{end}}
+{{range .Links}}<section class="link-row" id="{{.ID}}">
+<div class="head"><b>{{.Title}}</b> <small class="dim">{{if .Album}}앨범{{else}}{{.Count}}장{{end}} · {{.Created}} 만듦 · {{if .Gone}}<span class="gone">닫힘</span>{{else if .Until}}{{.Until}}{{else}}기한 없음{{end}}{{if .Password}} · 비밀번호{{end}}{{if not .Download}} · 원본 받기 막음{{end}}</small></div>
+{{with .Address}}<div class="address"><code>{{.}}</code><button type="button" class="button quiet" data-copy="{{.}}">{{template "i" "copy"}}<span>주소 복사</span></button></div>{{end}}
+<details><summary>바꾸기 · 닫기</summary>
+<form method="post" action="/links/{{.ID}}" class="stack narrow">
+<label>기한 <select name="days"><option value="">그대로</option><option value="7">오늘부터 7일</option><option value="30">오늘부터 30일</option><option value="365">오늘부터 1년</option><option value="0">기한 없음</option></select></label>
+<label class="check"><input type="checkbox" name="download" value="1"{{if .Download}} checked{{end}}> 원본 받기 허락</label>
+<label>비밀번호 <input name="password" type="password" autocomplete="new-password" placeholder="{{if .Password}}바꿀 때만 넣으세요{{else}}없음 — 넣으면 걸립니다{{end}}"></label>
+{{if .Password}}<label class="check"><input type="checkbox" name="remove" value="1"> 비밀번호 풀기</label>{{end}}
+<button class="button">저장</button></form>
+<form method="post" action="/links/{{.ID}}/delete"><button class="button quiet danger">링크 닫기</button> <span class="dim small">주소가 더 이상 열리지 않습니다. 사진은 그대로 있습니다.</span></form>
+</details></section>
+{{else}}<p class="empty">만든 링크가 없습니다.</p>{{end}}
+</main>{{template "foot" .}}{{end}}
 
 {{define "days"}}{{range .}}<div class="day"><h3><button class="pick" aria-label="이 날의 사진 모두 고르기">{{template "i" "check"}}</button>{{.Label}}</h3><div class="flow">{{template "cells" .Cells}}</div></div>{{end}}{{end}}
 
@@ -366,6 +417,7 @@ addEventListener("load", () => {
 {{define "timeline"}}{{template "head" .}}{{template "nav" .}}<main class="timeline"{{with .Query}} data-query="{{.}}"{{end}}>
 {{if .Narrowed}}{{if eq .Tab "places"}}<p class="up"><a href="/places">장소</a>{{range .Up}} › <a href="{{.Link}}">{{.Name}}</a>{{end}}</p>{{end}}
 <h1>{{.Title}} <small>{{.Total}}장</small></h1>
+{{if and .Album .LinksOn}}<div class="tools"><button type="button" class="button quiet" data-link-album="{{.Album}}">{{template "i" "link"}}<span>앨범을 링크로 공유</span></button></div>{{end}}
 {{with .Person}}<div class="tools"><form method="post" action="/people/{{.ID}}/name"><input name="name" value="{{.Name}}" placeholder="이름" maxlength="100" autocomplete="off"> <button class="button quiet">이름 저장</button></form>
 <form method="post" action="/people/{{.ID}}/hide">{{if .Hidden}}<input type="hidden" name="show" value="1"><button class="button quiet">다시 보이기</button>{{else}}<button class="button quiet">이 인물 숨기기</button>{{end}}</form></div>
 <p class="dim">이름을 붙이면 폰 앱의 인물에도 나타납니다. 사람이 아닌 것(인형 · 그림)이나 모르는 사람은 숨기면 됩니다 — 사진은 그대로 있습니다.</p>{{end}}
@@ -455,7 +507,7 @@ addEventListener("load", () => {
 {{with .Problem}}<div class="notice warn">{{template "i" "warn"}}<div>{{.}}</div></div>{{end}}
 {{if eq .Updating "failed"}}<div class="notice warn">{{template "i" "warn"}}<div><b>업데이트하지 못했습니다.</b> 잠시 뒤에 다시 해 주세요.{{if .Newer}}<form method="post" action="/admin/update"><button class="button">다시 업데이트</button></form>{{end}}</div></div>
 {{else if .Updating}}<div class="notice">{{template "i" "info"}}<div><b>업데이트하는 중입니다.</b> <a href="/admin/update">진행 보기</a></div></div>
-{{else if .Newer}}<div class="notice">{{template "i" "info"}}<div><b>새 버전 {{.Newer}} 이 있습니다</b> (지금 {{.Version}}). {{if eq system "linux"}}이 PC 에서 설치 스크립트를 다시 실행하면 됩니다: <code>curl -fsSL https://raw.githubusercontent.com/tidoly-com/stow/main/scripts/stow-linux.sh | sudo sh</code>{{else if .Away}}업데이트는 집 안에서 합니다.{{else}}<form method="post" action="/admin/update"><button class="button">업데이트</button></form>업데이트하는 동안 tidoly stow 가 잠깐 꺼졌다가 다시 열립니다.{{end}}</div></div>{{end}}
+{{else if .Newer}}<div class="notice">{{template "i" "info"}}<div><b>새 버전 {{.Newer}} 이 있습니다</b> (지금 {{.Version}}) · <a href="{{source}}/releases/tag/{{.Newer}}" target="_blank" rel="noopener">바뀐 것 보기</a>. {{if eq system "linux"}}이 PC 에서 설치 스크립트를 다시 실행하면 됩니다: <code>curl -fsSL https://raw.githubusercontent.com/tidoly-com/stow/main/scripts/stow-linux.sh | sudo sh</code>{{else if .Away}}업데이트는 집 안에서 합니다.{{else}}<form method="post" action="/admin/update"><button class="button">업데이트</button></form>업데이트하는 동안 tidoly stow 가 잠깐 꺼졌다가 다시 열립니다.{{end}}</div></div>{{end}}
 {{with .Arrivals}}<div class="notice">{{template "i" "info"}}<div><b>tidoly 로 처음 들어온 사람이 있습니다: {{.}}</b>모르는 사람이면 아래 사용자에서 그 사람의 tidoly 로그인을 막고, tidoly 에서도 빼 주세요. <form method="post" action="/admin/tidoly/seen"><button class="button quiet">확인했습니다</button></form></div></div>{{end}}
 {{with .Moved}}<div class="notice">{{template "i" "check"}}<div><b>이제 새 사진은 {{.}} 에 들어갑니다.</b>전에 올라온 사진은 원래 위치에 그대로 있고, 그대로 보입니다. 원래 위치로 돌리려면 아래 저장 위치에서 고르세요.</div></div>{{end}}
 <h2 class="with-act">저장 위치{{if not .Away}} <button type="button" class="icon" data-browse aria-label="위치 더하기" title="위치 더하기">{{template "i" "disk-plus"}}</button>{{end}}</h2>
