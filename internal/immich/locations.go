@@ -299,8 +299,9 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 		}
 		if c, ok := copies[rel]; ok && c.Size == info.Size() && c.Modified == modified {
 			// a copy of a photo the library has, not changed since: left out again without reading it, as
-			// long as that photo is still there elsewhere — deleted, this copy is read in in its place
-			if was, err := s.store.AssetByChecksum(ctx, loc.OwnerID, c.Checksum); err == nil && was.Location != id {
+			// long as that photo is still there — deleted, this copy is read in in its place; gone from its
+			// place in this same folder, it may have moved here, which reading it finds out
+			if was, err := s.store.AssetByChecksum(ctx, loc.OwnerID, c.Checksum); err == nil && (was.Location != id || stillThere(loc.Path, was.Path)) {
 				report.Same.Add(1)
 				return ctx.Err()
 			}
@@ -374,6 +375,12 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 		s.Changed(loc.OwnerID)
 	}
 	return nil
+}
+
+// stillThere says whether a file recorded in a folder is in its place.
+func stillThere(dir, rel string) bool {
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+	return err == nil
 }
 
 func checksum(file string) ([]byte, error) {
