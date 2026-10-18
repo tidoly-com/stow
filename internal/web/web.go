@@ -86,14 +86,17 @@ type Web struct {
 	SetFaces     func(ctx context.Context, on bool) error     // group faces into people from now on, or stop
 	CouponDays   bool                                         // started with the coupon helper: coupons have their last day
 	SetCoupons   func(ctx context.Context, on bool) error     // look for coupons from now on, or stop
-	Changed      func(userID string)                          // tells that person's devices to sync
-	Events       func(userID string) (<-chan string, func())  // that person's changes, as lines of JSON, for open pages
-	Trash        func(ctx context.Context, userID string, ids []string) error
-	Restore      func(ctx context.Context, userID string, ids []string) (int, error)
-	Empty        func(ctx context.Context, userID string) (int, error)
-	Days         int       // how long the trash keeps a photo
-	Links        LinkFuncs // shared links (#13), while the tunnel is on
-	mux          *http.ServeMux
+	// screenshots gathered into an album of their own, on unless switched off
+	ScreenshotsOn  func(ctx context.Context) bool
+	SetScreenshots func(ctx context.Context, on bool) error
+	Changed        func(userID string)                         // tells that person's devices to sync
+	Events         func(userID string) (<-chan string, func()) // that person's changes, as lines of JSON, for open pages
+	Trash          func(ctx context.Context, userID string, ids []string) error
+	Restore        func(ctx context.Context, userID string, ids []string) (int, error)
+	Empty          func(ctx context.Context, userID string) (int, error)
+	Days           int       // how long the trash keeps a photo
+	Links          LinkFuncs // shared links (#13), while the tunnel is on
+	mux            *http.ServeMux
 }
 
 const trashLimit = 2000 // photos shown in the trash
@@ -335,6 +338,7 @@ func (w *Web) Handler(loginStart, logout http.HandlerFunc) http.Handler {
 	m.HandleFunc("POST /admin/import/remove", w.page(w.adminImportAct))
 	m.HandleFunc("POST /admin/import/pause", w.page(w.adminImportAct))
 	m.HandleFunc("POST /admin/coupons", w.page(w.adminCoupons))
+	m.HandleFunc("POST /admin/screenshots", w.page(w.adminScreenshots))
 	m.HandleFunc("POST /admin/faces", w.page(w.adminFaces))
 	m.HandleFunc("GET /admin/tidoly/connect", w.startConnect)
 	m.HandleFunc("GET /admin/tidoly/back", w.finishConnect)
@@ -1118,6 +1122,7 @@ func (w *Web) adminPage(rw http.ResponseWriter, r *http.Request, user store.User
 	}
 	data["Away"], data["AwayFolders"] = !lan.From(r), awayFolders
 	data["CouponDays"], data["CouponsOn"], data["Faces"] = w.CouponDays, w.Store.CouponsOn(r.Context()), w.faces(r.Context())
+	data["ScreenshotsOn"] = w.ScreenshotsOn != nil && w.ScreenshotsOn(r.Context())
 	usable := 0
 	for _, p := range places {
 		if !p.Missing {
@@ -1536,6 +1541,19 @@ func (w *Web) adminCoupons(rw http.ResponseWriter, r *http.Request, user store.U
 	http.Redirect(rw, r, back(r), http.StatusSeeOther)
 }
 
+// adminScreenshots switches gathering screenshots into an album of their own on or off.
+func (w *Web) adminScreenshots(rw http.ResponseWriter, r *http.Request, user store.User) {
+	if !user.IsAdmin || w.SetScreenshots == nil {
+		http.NotFound(rw, r)
+		return
+	}
+	if err := w.SetScreenshots(r.Context(), r.FormValue("on") != ""); err != nil {
+		w.fail(rw, err)
+		return
+	}
+	http.Redirect(rw, r, back(r), http.StatusSeeOther)
+}
+
 // ── accounts the server keeps itself ────────────────────────────────────────────────────────────────────────
 
 // localLogin takes the address and password from the login page.
@@ -1630,7 +1648,8 @@ func (w *Web) startAuto(rw http.ResponseWriter, r *http.Request, user store.User
 		return
 	}
 	w.render(rw, "start-auto", map[string]any{"Title": "자동 정리", "Steps": stepsAt(6),
-		"Faces": w.faces(r.Context()), "CouponsOn": w.Store.CouponsOn(r.Context()), "CouponDays": w.CouponDays})
+		"Faces": w.faces(r.Context()), "CouponsOn": w.Store.CouponsOn(r.Context()), "CouponDays": w.CouponDays,
+		"ScreenshotsOn": w.ScreenshotsOn != nil && w.ScreenshotsOn(r.Context())})
 }
 
 // back is where a switch or a folder chosen on a first step returns to: that step; from the admin page, the

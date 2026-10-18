@@ -119,7 +119,7 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 	if err := api.LoadLocations(ctx); err != nil {
 		t.Fatal(err)
 	}
-	pages := &web.Web{Store: st, User: api.SessionUser, Address: "http://light.test", FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, Changed: api.Changed, Events: api.WebEvents,
+	pages := &web.Web{Store: st, User: api.SessionUser, Address: "http://light.test", FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, ScreenshotsOn: api.ScreenshotsOn, SetScreenshots: api.SetScreenshots, Changed: api.Changed, Events: api.WebEvents,
 		Dir: dir, ResetFile: filepath.Join(dir, "owner-reset"), Contact: testHome + "/contact", Version: "test-1",
 		VPN: &vpn.Manager{VPN: &vpn.VPN{Port: freeUDPPort(t), Handler: api}, Settings: st}, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
