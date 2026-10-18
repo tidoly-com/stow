@@ -359,7 +359,8 @@ func (s *Server) serveOriginal(w http.ResponseWriter, r *http.Request, asset sto
 }
 
 // serveThumbnail sends a small picture made earlier by the thumbnail job. It never makes one: a request
-// that arrives before the job has run gets the original (a photo) or a blank (a video) instead.
+// that arrives before the job has run gets the original (a photo) or a blank (a video, or a photo through a
+// shared link that keeps originals back) instead.
 func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset store.Asset) {
 	sizes := []string{"thumbnail"}
 	if size := r.URL.Query().Get("size"); size == "preview" || size == "fullsize" {
@@ -374,7 +375,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset st
 			return
 		}
 	}
-	if asset.Type == "VIDEO" {
+	if asset.Type == "VIDEO" || keepsOriginal(r) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "no-store") // the real one is on its way
 		w.Write(tinyJPEG)
