@@ -959,7 +959,7 @@ func TestTheSameFaceInTwoPhotosBecomesAPerson(t *testing.T) {
 	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); res.StatusCode != 200 || err != nil || cfg.Width != 250 || cfg.Height != 250 {
 		t.Errorf("her picture: status %d, %v, %dx%d", res.StatusCode, err, cfg.Width, cfg.Height)
 	}
-	// two look-alikes in one photo are still two people: only one of them may join alice
+	// the same face twice in one photo — a mirror, a collage — is kept once, and joins alice
 	photo("alice with alice in a mirror.jpg", 6)
 	e.settle()
 	joined, alone := 0, 0
@@ -974,21 +974,21 @@ func TestTheSameFaceInTwoPhotosBecomesAPerson(t *testing.T) {
 			}
 		}
 	}
-	if joined != 3 { // beach, with carol, and one of the two in the mirror
-		t.Errorf("faces that are alice: %d, want 3", joined)
+	if joined != 3 || alone != 2 { // beach, with carol, and the larger of the two in the mirror; the other is left out — alone: bob and carol
+		t.Errorf("faces that are alice: %d, nobody's: %d, want 3 and 2", joined, alone)
 	}
 
 	// a face too small to tell apart is not kept at all, however often it shows up
 	photo("bob far away.jpg", 8)
 	photo("bob far away again.jpg", 10)
 	e.settle()
-	if lone, _ := e.store.LoneFaces(context.Background(), e.userID("owner@example.com")); lone != 3 { // bob close up, carol, alice in the mirror
-		t.Errorf("faces that are nobody yet: %d, want 3", lone)
+	if lone, _ := e.store.LoneFaces(context.Background(), e.userID("owner@example.com")); lone != 2 { // bob close up, carol
+		t.Errorf("faces that are nobody yet: %d, want 2", lone)
 	}
 
 	// putting alice away: the app is told she is hidden, the web list drops her, and a new photo of her stays away
 	browser := e.browserLogin("owner@example.com", "owner")
-	if _, page := e.browse("/people", browser); !strings.Contains(page, alice["id"].(string)) || !strings.Contains(page, "한 번만 나온 얼굴 3개") {
+	if _, page := e.browse("/people", browser); !strings.Contains(page, alice["id"].(string)) || !strings.Contains(page, "한 번만 나온 얼굴 2개") {
 		t.Errorf("people page before hiding: %s", page)
 	}
 	hide := func(id string, form url.Values, cookie *http.Cookie) int {

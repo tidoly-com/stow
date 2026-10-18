@@ -232,6 +232,13 @@ func main() {
 	} else if n > 0 {
 		log.Printf("coupons: %d pictures not looked at yet, queued", n)
 	}
+	go func() { // photos read before a face repeated in one photo was taken as one
+		if n, err := api.LookAgainAtRepeats(ctx); err != nil {
+			log.Printf("faces: %v", err)
+		} else if n > 0 {
+			log.Printf("faces: %d photos with the same face more than once, looked at again", n)
+		}
+	}()
 	go func() { // pictures read before screenshots were gathered, or while it was switched off
 		if n, err := api.FileScreenshots(ctx); err != nil {
 			log.Printf("screenshots: %v", err)
