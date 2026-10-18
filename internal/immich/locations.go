@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tidoly-com/stow/internal/disk"
+	"github.com/tidoly-com/stow/internal/media"
 	"github.com/tidoly-com/stow/internal/store"
 )
 
@@ -278,8 +280,12 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 		if err != nil {
 			return nil
 		}
+		created := modified // until the photo is read: the day its name or folders tell, else the file's own
+		if t, ok := media.DateFromPath(rel, time.Local); ok {
+			created = store.Timestamp(t)
+		}
 		asset := store.Asset{ID: store.NewID(), OwnerID: loc.OwnerID, Checksum: sum, OriginalName: name, Location: id, Path: rel,
-			Size: info.Size(), Type: "IMAGE", FileCreatedAt: modified, FileModifiedAt: modified}
+			Size: info.Size(), Type: "IMAGE", FileCreatedAt: created, FileModifiedAt: modified}
 		if videoExt[ext] {
 			asset.Type = "VIDEO"
 		}

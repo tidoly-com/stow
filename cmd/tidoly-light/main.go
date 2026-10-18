@@ -232,10 +232,10 @@ func main() {
 	} else if n > 0 {
 		log.Printf("coupons: %d pictures not looked at yet, queued", n)
 	}
-	if n, err := api.QueueUndatedEdits(ctx); err != nil {
-		log.Printf("edited copies: %v", err)
+	if n, err := api.QueueUndated(ctx); err != nil {
+		log.Printf("undated photos: %v", err)
 	} else if n > 0 {
-		log.Printf("edited copies: %d read without a date, read again", n)
+		log.Printf("undated photos: %d whose day can now be told, read again", n)
 	}
 	if n, err := api.QueueMissingThumbnails(ctx); err != nil {
 		log.Printf("thumbnails: %v", err)
