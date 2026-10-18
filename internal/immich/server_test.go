@@ -134,7 +134,8 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 			if scan == nil {
 				return web.FolderState{}, false
 			}
-			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load()}, true
+			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(),
+				Total: scan.Total.Load(), Counted: scan.Counted.Load()}, true
 		},
 		Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: TrashDays,
 		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashPassword}}

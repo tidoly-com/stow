@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -125,6 +126,8 @@ type Outside struct {
 type FolderState struct {
 	Running                 bool
 	Seen, Added, Same, Gone int64
+	Total                   int64 // photos and videos in the folder; still going up until Counted
+	Counted                 bool
 	Failure                 string
 }
 
@@ -240,6 +243,31 @@ func bytesText(n int64) string {
 		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
 	}
 	return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+}
+
+// countText writes a count with its thousands apart: 14,298.
+func countText(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0 && s[i-1] != '-'; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+// progressText is how far a count of done things is in all of them: "3,913 / 14,298장 (27%)".
+func progressText(done, total int64) string {
+	if total <= 0 {
+		return countText(done) + "장"
+	}
+	return fmt.Sprintf("%s / %s장 (%d%%)", countText(done), countText(total), percent(done, total))
+}
+
+// percent rounds down, so 100 means all of them, never all but a few.
+func percent(done, total int64) int64 {
+	if total <= 0 {
+		return 0
+	}
+	return min(done*100/total, 100)
 }
 
 // frame is what every page needs around its own content: who is looking and how full the disk is.
@@ -973,6 +1001,8 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 	type row struct {
 		Name                          string
 		Queued, Running, Done, Failed int
+		Progress                      string // "12,481 / 14,760장 (84%)": done or given up, in all of them
+		Max, Value                    int
 	}
 	var jobs []row
 	for _, kind := range []string{"metadata", "thumbnail", "place", "face", "coupon"} {
@@ -992,6 +1022,8 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 				line.Failed = rep.Count
 			}
 		}
+		line.Max, line.Value = line.Queued+line.Running+line.Done+line.Failed, line.Done+line.Failed
+		line.Progress = progressText(int64(line.Value), int64(line.Max))
 		if kind != "face" || w.faces(r.Context()) == "on" {
 			jobs = append(jobs, line)
 		}
@@ -1065,8 +1097,10 @@ func (w *Web) placesFor(ctx context.Context, user store.User) (places, folders [
 		if state, ok := w.FolderState(l.ID); ok && !l.Paused {
 			p.Running = state.Running
 			switch {
+			case state.Running && !state.Counted:
+				p.State = fmt.Sprintf("파일 세는 중 — %s개", countText(state.Total))
 			case state.Running:
-				p.State = fmt.Sprintf("훑는 중 — %d개 봄", state.Seen)
+				p.State = "훑는 중 — " + progressText(state.Seen, state.Total)
 			case state.Failure != "":
 				p.State = "훑지 못했습니다. 디스크가 연결되어 있는지 확인해 주세요"
 			default:
