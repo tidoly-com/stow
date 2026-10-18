@@ -434,13 +434,6 @@ addEventListener("load", () => {
 {{range .Months}}<section data-month="{{.Key}}" data-count="{{.Count}}" aria-label="{{.Label}}"><div class="days"></div></section>{{end}}
 </main>{{if .Months}}<div class="years" aria-label="연도"></div>{{end}}{{template "foot" .}}{{end}}
 
-{{define "coupons"}}{{template "head" .}}{{template "nav" .}}<main class="coupons">
-<h1>{{.Title}} <small>{{.Total}}장</small></h1>
-<p class="dim">유효기간이 가까운 것부터, 유효기간을 모르는 것은 그 뒤에 놓았습니다. 기간이 지난 쿠폰은 아래에 접어 두었습니다. 쿠폰이 아닌 것은 앨범에서 빼면 다시 들어오지 않습니다.</p>
-{{if .Valid}}{{template "days" .Valid}}{{else}}<p class="empty">쓸 수 있는 쿠폰이 없습니다.</p>{{end}}
-{{if .Past}}<details class="past"><summary>지난 쿠폰 {{.PastCount}}장</summary>{{template "days" .Past}}</details>{{end}}
-</main>{{template "foot" .}}{{end}}
-
 {{define "trash"}}{{template "head" .}}{{template "nav" .}}<main class="trash">
 <h1>휴지통 <small>{{.Count}}</small></h1>
 <p class="dim">지운 사진은 여기에 {{.Days}}일 동안 있다가 <b>완전히 지워집니다</b>. 그 전에는 언제든 복원할 수 있고, 그동안 파일은 디스크에 그대로 있습니다. 등록한 기존 사진 폴더의 사진은 완전히 지워도 원본 파일이 그 폴더에 남고, tidoly stow 에서만 빠집니다.</p>

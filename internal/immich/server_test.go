@@ -2809,8 +2809,7 @@ func TestCouponsGatherInAnAlbumOnceSwitchedOn(t *testing.T) {
 		if m == nil {
 			return "", ""
 		}
-		_, inside := e.browse("/albums/"+m[1], owner) // the coupon album is drawn whole, by last day
-		return m[1], inside
+		return m[1], e.albumCells(m[1], owner)
 	}
 	if id, _ := album(); id != "" {
 		t.Fatal("an album was made while coupons were off")
@@ -2846,13 +2845,27 @@ func TestCouponsGatherInAnAlbumOnceSwitchedOn(t *testing.T) {
 	second := up("coupon-2.jpg", barcodeJPEG(t, "222222222222"))
 	old := up("old-coupon.jpg", barcodeJPEG(t, "111111111111"))
 	e.settle()
-	// the coupon album: the ones still good by their last day, the past ones folded below
+	// the coupon album is drawn as any album, by the day each picture was taken — its last day is not
+	// read surely enough to sort by
 	_, page := e.browse("/albums/"+id, owner)
-	good, unknown, gone := strings.Index(page, second), strings.Index(page, member), strings.Index(page, old)
-	if good < 0 || unknown < 0 || gone < 0 || good > unknown || unknown > gone || !strings.Contains(page, "2099년 12월 31일까지") || !strings.Contains(page, "유효기간 모름") ||
-		!strings.Contains(page, "지난 쿠폰 1장") || !strings.Contains(page, "2020년 1월 3일에 끝남") {
-		t.Errorf("coupon album page: %s", page)
+	if !strings.Contains(page, "<section data-month=") || strings.Contains(page, "지난 쿠폰") {
+		t.Errorf("coupon album page, not by day: %s", page)
 	}
+	if _, cells := album(); !strings.Contains(cells, second) || !strings.Contains(cells, old) || !strings.Contains(cells, member) {
+		t.Errorf("coupon album: %s", cells)
+	}
+}
+
+// albumCells is what an album page shows, month by month as the page fetches them.
+func (e *env) albumCells(id string, session *http.Cookie) string {
+	e.t.Helper()
+	_, page := e.browse("/albums/"+id, session)
+	var all strings.Builder
+	for _, m := range regexp.MustCompile(`<section data-month="([0-9-]+)"`).FindAllStringSubmatch(page, -1) {
+		_, cells := e.browse("/web/month/"+m[1]+"?album="+url.QueryEscape(id), session)
+		all.WriteString(cells)
+	}
+	return all.String()
 }
 
 // Without the coupon helper — Windows, Linux — a picture with a barcode still goes to the coupon album,
@@ -2873,8 +2886,8 @@ func TestCouponsGatherWithoutTheHelper(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no coupon album: %s", page)
 	}
-	_, inside := e.browse("/albums/"+m[1], owner)
-	if !strings.Contains(inside, a["id"].(string)) || strings.Contains(inside, b["id"].(string)) || !strings.Contains(inside, "유효기간 모름") {
+	inside := e.albumCells(m[1], owner)
+	if !strings.Contains(inside, a["id"].(string)) || strings.Contains(inside, b["id"].(string)) {
 		t.Errorf("coupon album without the helper: %s", inside)
 	}
 }
