@@ -495,9 +495,10 @@ addEventListener("load", () => {
 <h2>저장 공간</h2>
 {{with .Disk}}<p>이 디스크 {{.Total}} 중 {{.Used}} 사용, {{.Free}} 남음</p><progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}
 <p>내 사진 · 영상 {{.Files}}개, {{.Size}}</p>
-<h2>뒤에서 하는 일</h2>
+<section id="jobs"{{if .Left}} data-working{{end}}><h2>뒤에서 하는 일</h2>
+<p>{{if .Left}}남은 작업 <b>{{.LeftText}}개</b>{{with .Now}} · 지금 {{.}}{{end}}. 끝나면 날짜 · 인물 · 장소가 다 채워집니다. 이 화면은 저절로 바뀝니다.{{else}}모두 끝났습니다.{{end}}</p>
 <table class="jobs"><tr><th>일</th><th>진행</th><th>기다림</th><th>하는 중</th><th>끝남</th><th>실패</th></tr>
-{{range .Jobs}}<tr><td>{{.Name}}</td><td class="progress">{{.Progress}}{{if .Max}}<progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}</td><td>{{.Queued}}</td><td>{{.Running}}</td><td>{{.Done}}</td><td>{{.Failed}}</td></tr>{{end}}</table>
+{{range .Jobs}}<tr><td>{{.Name}}</td><td class="progress">{{.Progress}}{{if .Max}}<progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}</td><td>{{.Queued}}</td><td>{{.Running}}</td><td>{{.Done}}</td><td>{{.Failed}}</td></tr>{{end}}</table></section>
 {{if .Failures}}<h2>처리하지 못한 파일</h2>
 <table><tr><th>파일</th><th>일</th><th>이유</th></tr>{{range .Failures}}<tr><td>{{.Name}}</td><td>{{.Kind}}</td><td class="dim">{{.Error}}</td></tr>{{end}}</table>
 <p class="dim">파일 자체는 보관되어 있습니다.</p>{{end}}
@@ -510,6 +511,7 @@ addEventListener("load", () => {
 {{if eq .Updating "failed"}}<div class="notice warn">{{template "i" "warn"}}<div><b>업데이트하지 못했습니다.</b> 잠시 뒤에 다시 해 주세요.{{if .Newer}}<form method="post" action="/admin/update"><button class="button">다시 업데이트</button></form>{{end}}</div></div>
 {{else if .Updating}}<div class="notice">{{template "i" "info"}}<div><b>업데이트하는 중입니다.</b> <a href="/admin/update">진행 보기</a></div></div>
 {{else if .Newer}}<div class="notice">{{template "i" "info"}}<div><b>새 버전 {{.Newer}} 이 있습니다</b> (지금 {{.Version}}) · <a href="{{source}}/releases/tag/{{.Newer}}" target="_blank" rel="noopener">바뀐 것 보기</a>. {{if not .ByButton}}이 PC 에서 설치 스크립트를 다시 실행하면 됩니다: <code>curl -fsSL https://raw.githubusercontent.com/tidoly-com/stow/main/scripts/stow-linux.sh | sudo sh</code>{{if eq system "linux"}} — 한 번 실행하면 그다음부터는 여기의 업데이트 단추로 됩니다.{{end}}{{else if .Away}}업데이트는 집 안에서 합니다.{{else}}<form method="post" action="/admin/update"><button class="button">업데이트</button></form>업데이트하는 동안 tidoly stow 가 잠깐 꺼졌다가 다시 열립니다.{{end}}</div></div>{{end}}
+{{with .Left}}<div class="notice">{{template "i" "info"}}<div><b>사진을 정리하는 중입니다 — 남은 작업 {{.}}개</b>{{with $.Now}} · 지금 {{.}}{{end}} · <a href="/status#jobs">진행 보기</a></div></div>{{end}}
 {{with .Arrivals}}<div class="notice">{{template "i" "info"}}<div><b>tidoly 로 처음 들어온 사람이 있습니다: {{.}}</b>모르는 사람이면 아래 사용자에서 그 사람의 tidoly 로그인을 막고, tidoly 에서도 빼 주세요. <form method="post" action="/admin/tidoly/seen"><button class="button quiet">확인했습니다</button></form></div></div>{{end}}
 {{with .Moved}}<div class="notice">{{template "i" "check"}}<div><b>이제 새 사진은 {{.}} 에 들어갑니다.</b>전에 올라온 사진은 원래 위치에 그대로 있고, 그대로 보입니다. 원래 위치로 돌리려면 아래 저장 위치에서 고르세요.</div></div>{{end}}
 <h2 class="with-act">저장 위치{{if not .Away}} <button type="button" class="icon" data-browse aria-label="위치 더하기" title="위치 더하기">{{template "i" "disk-plus"}}</button>{{end}}</h2>

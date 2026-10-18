@@ -428,6 +428,20 @@
     if (form) form.submit();
   });
 
+  // The work going on in the background: its part of the page is fetched again until nothing is left.
+  const refreshJobs = () => {
+    if (!document.querySelector("#jobs[data-working]")) return;
+    setTimeout(() => fetch(location.pathname, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((html) => {
+        const fresh = new DOMParser().parseFromString(html, "text/html").querySelector("#jobs");
+        if (fresh) document.querySelector("#jobs").replaceWith(fresh);
+      })
+      .catch(() => {}) // the server is busy or restarting: try again next time
+      .finally(refreshJobs), 5000);
+  };
+  refreshJobs();
+
   // Choosing a folder on the server's machine, one step at a time.
   const browse = document.querySelectorAll("[data-browse]");
   if (browse.length) {

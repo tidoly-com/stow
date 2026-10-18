@@ -991,6 +991,23 @@ func (w *Web) trashAct(rw http.ResponseWriter, r *http.Request, user store.User)
 
 var jobNames = map[string]string{"metadata": "사진 정보 읽기", "thumbnail": "작은 그림 만들기", "place": "장소 이름 붙이기", "face": "얼굴 찾기", "coupon": "쿠폰 찾기"}
 
+// jobsLeft is what is still to be done in the background, and the work going on now: "얼굴 찾기 · 장소 이름 붙이기".
+func jobsLeft(reports []store.JobReport) (left int, now string) {
+	var doing []string
+	for _, kind := range []string{"metadata", "thumbnail", "place", "face", "coupon"} {
+		for _, rep := range reports {
+			if rep.Kind != kind || rep.State != "queued" && rep.State != "running" {
+				continue
+			}
+			left += rep.Count
+			if rep.State == "running" {
+				doing = append(doing, jobNames[kind])
+			}
+		}
+	}
+	return left, strings.Join(doing, " · ")
+}
+
 func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 	ctx := r.Context()
 	files, bytes, err := w.Store.Totals(ctx, user.ID)
@@ -1035,7 +1052,9 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 		failures[i].Kind = jobNames[failures[i].Kind]
 	}
 	data := w.frame(r.Context(), user, "상태", "status")
+	left, now := jobsLeft(reports)
 	for k, v := range map[string]any{"Addr": w.addresses(r.Context()), "Invite": w.invite(r.Context(), ""), "Files": files, "Size": bytesText(bytes), "Jobs": jobs, "Failures": failures,
+		"Left": left, "LeftText": countText(int64(left)), "Now": now,
 		"LocationOff": camera >= 10 && located == 0, "Camera": camera} {
 		data[k] = v
 	}
@@ -1154,6 +1173,11 @@ func (w *Web) adminPage(rw http.ResponseWriter, r *http.Request, user store.User
 		data["Arrivals"] = strings.Join(names, ", ")
 	}
 	data["Moved"] = r.URL.Query().Get("moved") // a place was just added and made the one new photos go to
+	if reports, err := w.Store.JobReports(ctx); err == nil {
+		if left, now := jobsLeft(reports); left > 0 {
+			data["Left"], data["Now"] = countText(int64(left)), now
+		}
+	}
 	if w.Update != nil {
 		data["Newer"], data["Updating"], data["ByButton"] = w.Update.Newer(), w.Update.State(), w.Update.ByButton()
 	}
