@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tidoly-com/stow/internal/media/mediatest"
 )
@@ -134,5 +135,32 @@ func TestALinkThatKeepsOriginalsBackNeverSendsOneForAThumbnail(t *testing.T) {
 	res.Body.Close()
 	if n != int64(len(original)) {
 		t.Errorf("its owner, before the small picture is made: %d bytes, want the original's %d", n, len(original))
+	}
+}
+
+// A photo read further — its place, its faces — names its month to the web pages, so that an open page
+// fetches that month again and not every month it shows.
+func TestAPhotoReadFurtherNamesItsMonthToThePages(t *testing.T) {
+	e := start(t, t.TempDir(), newKey(t))
+	phone := e.login("owner@example.com", "owner")
+	_, a := e.upload(phone, "a.jpg", mediatest.JPEG(nil, 40, 30))
+	e.settle()
+	id, owner := a["id"].(string), e.userID("owner@example.com")
+	asset, err := e.store.AssetByID(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, stop := e.api.WebEvents(owner)
+	defer stop()
+	e.api.hub.emit(owner, "on_asset_update", map[string]any{"id": id})
+	select {
+	case line := <-events:
+		var got struct{ Event, Month string }
+		json.Unmarshal([]byte(line), &got)
+		if want := assetMonth(asset); got.Event != "on_asset_update" || got.Month != want || want == "" {
+			t.Errorf("%s, want the month %q", line, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no event")
 	}
 }

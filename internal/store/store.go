@@ -261,8 +261,11 @@ type Job struct {
 }
 
 func Open(path string) (*Store, error) {
-	// _txlock=immediate: a transaction that will write takes the write lock up front instead of failing halfway
-	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)")
+	// _txlock=immediate: a transaction that will write takes the write lock up front instead of failing halfway.
+	// busy_timeout of a minute: on a hard disk that is also taking a large copy, one write can take seconds to
+	// reach the disk, and with ten seconds the others gave up — "database is locked" 198 times in an hour on a
+	// laptop (2026-10-18).
+	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(60000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
