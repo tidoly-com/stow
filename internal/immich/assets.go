@@ -503,7 +503,9 @@ func (s *Server) QueueUndated(ctx context.Context) (queued int, err error) {
 }
 
 // QueueMissingThumbnails queues the thumbnail job for every asset without small pictures: photos taken
-// in by a version of the program that made none, or a derived/ folder that was deleted.
+// in by a version of the program that made none, or a derived/ folder that was deleted. A file of a kind
+// none is made for (GIF, WebP, a video ffmpeg does not know) is left out: queued at every start, it told
+// every open page of a changed photo each time.
 func (s *Server) QueueMissingThumbnails(ctx context.Context) (queued int, err error) {
 	ids, err := s.store.AssetsWithoutJob(ctx, "thumbnail", false)
 	if err != nil {
@@ -512,6 +514,11 @@ func (s *Server) QueueMissingThumbnails(ctx context.Context) (queued int, err er
 	for _, id := range ids {
 		if s.cfg.Thumbs.Has(id) {
 			continue
+		}
+		if a, err := s.store.AssetByID(ctx, id); err == nil {
+			if info, err := media.Read(s.lib.Path(a.Location, a.Path), time.Local); err == nil && info.Kind == "" {
+				continue
+			}
 		}
 		if err := s.store.AddJob(ctx, id, "thumbnail"); err != nil {
 			return queued, err

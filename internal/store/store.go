@@ -294,6 +294,13 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	// the files of a folder by path, in the case LIKE ignores: the look at a folder lists them, and pairing
+	// live photos looks up each short video's photo by name — without it, each lookup read every photo, and
+	// the 536 videos with no photo of their own read 13 GB at every start (2026-10-19)
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assets_place ON assets(location, path COLLATE NOCASE)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("schema: %w", err)
+	}
 	// the same failure, added again at each start before AssetsWithoutJob left it out: the last one is kept
 	if _, err := db.Exec(`DELETE FROM jobs WHERE state = 'failed' AND EXISTS
 		(SELECT 1 FROM jobs n WHERE n.asset_id = jobs.asset_id AND n.kind = jobs.kind AND n.id > jobs.id)`); err != nil {
@@ -1422,10 +1429,14 @@ type Sibling struct {
 }
 
 // Siblings lists the owner's files in one location whose path is stem plus a dot and an ending.
+// siblings finds the files named stem.* through assets_place by their range (LIKE with ESCAPE never uses
+// an index); LIKE keeps its sense.
+const siblings = `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id AND v.live_of != '')
+	FROM assets a WHERE a.owner_id = ? AND a.location = ? AND a.path >= ? COLLATE NOCASE AND a.path < ? COLLATE NOCASE AND a.path LIKE ? ESCAPE '\'`
+
 func (s *Store) Siblings(ctx context.Context, ownerID, location, stem string) ([]Sibling, error) {
 	like := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(stem) + `.%`
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id AND v.live_of != '')
-		FROM assets a WHERE a.owner_id = ? AND a.location = ? AND a.path LIKE ? ESCAPE '\'`, ownerID, location, like)
+	rows, err := s.db.QueryContext(ctx, siblings, ownerID, location, stem+".", stem+"/", like)
 	if err != nil {
 		return nil, err
 	}

@@ -110,3 +110,18 @@ func TestAFailedJobIsNotQueuedAgainAtEachStart(t *testing.T) {
 		t.Errorf("%d failures kept for one file, want 1", n)
 	}
 }
+
+// Pairing a short video with its photo looks the photo up by name through the folder's index: each lookup
+// read every photo, and a library with 536 videos of no photo read 13 GB at every start (2026-10-19).
+func TestAVideosPhotoIsFoundThroughTheFolderIndex(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "stow.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var detail string
+	s.db.QueryRow(`EXPLAIN QUERY PLAN `+siblings, "x", "y", "IMG_1.", "IMG_1/", "IMG\\_1.%").Scan(new(int), new(int), new(int), &detail)
+	if !strings.Contains(detail, "assets_place") || !strings.Contains(detail, "path>") {
+		t.Errorf("plan: %s", detail)
+	}
+}
