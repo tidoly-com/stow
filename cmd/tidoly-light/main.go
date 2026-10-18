@@ -595,6 +595,7 @@ func folderState(api *immich.Server) func(string) (web.FolderState, bool) {
 			return web.FolderState{}, false
 		}
 		failure, _ := scan.Failure.Load().(string)
-		return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(), Failure: failure}, true
+		return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(),
+			Total: scan.Total.Load(), Counted: scan.Counted.Load(), Failure: failure}, true
 	}
 }

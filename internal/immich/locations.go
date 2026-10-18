@@ -128,6 +128,8 @@ type Scan struct {
 	Running                 atomic.Bool
 	Seen, Added, Same, Gone atomic.Int64 // files looked at, new to the library, already in it from elsewhere, no longer there
 	Moved                   atomic.Int64 // found under another path or name than before
+	Total                   atomic.Int64 // photos and videos in the folder, counted before the look, so it can say how far it is
+	Counted                 atomic.Bool  // Total is the whole count, not one still going up
 	Failure                 atomic.Value // string: why the look stopped early
 }
 
@@ -221,6 +223,30 @@ func (s *Server) FolderScan(id string) *Scan {
 
 var imageExt = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".heic": true, ".heif": true, ".webp": true, ".gif": true}
 
+// mediaFiles calls found for each photo or video under root, in the folders a look goes through.
+func mediaFiles(root string, found func(full string, entry fs.DirEntry) error) error {
+	return filepath.WalkDir(root, func(full string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			if full == root {
+				return err
+			}
+			return nil // a folder inside that cannot be read is passed over
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			if full != root && passOver(name) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(name))
+		if strings.HasPrefix(name, ".") || !(imageExt[ext] || videoExt[ext]) || !entry.Type().IsRegular() {
+			return nil
+		}
+		return found(full, entry)
+	})
+}
+
 // scan brings the library in line with what is in the folder now: new files come in, files that are
 // gone leave, files their owner deleted from the library stay out. Nothing in the folder is touched.
 func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
@@ -242,25 +268,16 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 	if err != nil {
 		return err
 	}
+	// Counting first costs one more walk through the folders, names only — no file is opened — and
+	// lets the page say "3,913 / 14,298" rather than a number that only goes up.
+	if err := mediaFiles(loc.Path, func(string, fs.DirEntry) error { report.Total.Add(1); return ctx.Err() }); err != nil {
+		return err
+	}
+	report.Counted.Store(true)
 	seen := map[string]bool{}
-	err = filepath.WalkDir(loc.Path, func(full string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if full == loc.Path {
-				return err
-			}
-			return nil // a folder inside that cannot be read is passed over
-		}
+	err = mediaFiles(loc.Path, func(full string, entry fs.DirEntry) error {
 		name := entry.Name()
-		if entry.IsDir() {
-			if full != loc.Path && passOver(name) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
 		ext := strings.ToLower(filepath.Ext(name))
-		if strings.HasPrefix(name, ".") || !(imageExt[ext] || videoExt[ext]) || !entry.Type().IsRegular() {
-			return nil
-		}
 		relative, _ := filepath.Rel(loc.Path, full)
 		rel := filepath.ToSlash(relative)
 		seen[rel] = true

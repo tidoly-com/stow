@@ -125,6 +125,10 @@ h2.with-act .icon { width: 32px; height: 32px; }
 table { border-collapse: collapse; width: 100%; max-width: 720px; font-size: .9375rem; }
 td, th { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 th { color: var(--muted-foreground); font-weight: 500; }
+.jobs td, .jobs th { font-variant-numeric: tabular-nums; }
+.jobs td.progress { min-width: 9rem; }
+.jobs td.progress progress { margin-top: 6px; }
+@media (max-width: 600px) { .jobs tr > :nth-child(4), .jobs tr > :nth-child(5) { display: none; } } /* the progress column says what is done */
 .toast { position: fixed; left: 50%; bottom: 24px; z-index: 9; transform: translateX(-50%); padding: 10px 18px; border-radius: var(--pill); background: var(--foreground); color: var(--background); font-size: .9375rem; box-shadow: var(--shadow); }
 
 /* frame: a bar on top, the menu on the left, the page beside it */
