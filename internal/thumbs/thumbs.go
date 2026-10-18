@@ -147,22 +147,32 @@ func (m *Maker) Make(ctx context.Context, src, assetID string, info media.Info) 
 	return write(m.Path(assetID, "thumbnail"), scale(preview, ratio), 78)
 }
 
-// frame asks ffmpeg for one picture from a HEIC photo or a video.
+// frameArgs ask ffmpeg for one picture, on one thread: left to itself ffmpeg takes every core, and with a
+// job runner of several workers each starting one, a laptop sat at a load of 85 with the photo pages
+// taking 7 s to answer (2026-10-18). The workers are what runs several at once.
+func frameArgs(src string, at time.Duration) []string {
+	args := []string{"-v", "error", "-nostdin", "-threads", "1", "-filter_threads", "1"}
+	if at > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(at.Seconds(), 'f', 3, 64))
+	}
+	return append(args, "-i", src, "-frames:v", "1", "-threads", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "2", "pipe:1")
+}
+
+// frame asks ffmpeg for one picture from a HEIC photo or a video, behind the pages people are looking at.
 func (m *Maker) frame(ctx context.Context, src string, at time.Duration) (image.Image, error) {
 	if m.FFmpeg == "" {
 		return nil, ErrNoDecoder
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	args := []string{"-v", "error", "-nostdin"}
-	if at > 0 {
-		args = append(args, "-ss", strconv.FormatFloat(at.Seconds(), 'f', 3, 64))
-	}
-	args = append(args, "-i", src, "-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "2", "pipe:1")
 	var out, errOut bytes.Buffer
-	cmd := exec.CommandContext(ctx, m.FFmpeg, args...)
+	cmd := exec.CommandContext(ctx, m.FFmpeg, frameArgs(src, at)...)
 	cmd.Stdout, cmd.Stderr = &out, &errOut
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("ffmpeg: %v", err)
+	}
+	behind(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
 		return nil, fmt.Errorf("ffmpeg: %v: %.200s", err, errOut.String())
 	}
 	img, err := jpeg.Decode(&out)
