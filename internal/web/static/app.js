@@ -152,9 +152,12 @@
 
     // Photos arriving from a phone, or changed on another device, show without reloading. The server
     // names the month of a new photo: a month on the page is fetched again; one the page does not have
-    // yet means the page itself is. While a photo is open or some are chosen, it waits.
+    // yet means the page itself is. While a photo is open or some are chosen, it waits. Only the months
+    // named are fetched, and no more often than every few seconds: while thousands of photos are being
+    // read, the news never stops, and fetching every month on the page each time kept a laptop's disk busy.
     if (window.EventSource) {
-      let wait = null, reload = false;
+      let wait = null, reload = false, all = false, last = 0;
+      const named = new Set();
       const refetch = (section) => fetch("/web/month/" + section.dataset.month + (main.dataset.query || location.search), { credentials: "same-origin" })
         .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
         .then((html) => { if (section.dataset.loaded) { const box = section.querySelector(".days"); box.innerHTML = html; dress(box); } })
@@ -163,13 +166,17 @@
         wait = null;
         if ((viewer && viewer.open) || picked.size) { wait = setTimeout(apply, 2000); return; }
         if (reload) return location.reload();
-        months.forEach((s) => { if (s.dataset.loaded) refetch(s); });
+        months.forEach((s) => { if (s.dataset.loaded && (all || named.has(s.dataset.month))) refetch(s); });
+        named.clear();
+        all = false;
+        last = Date.now();
       };
       new EventSource("/web/events").addEventListener("message", (event) => {
         const { month } = JSON.parse(event.data);
         if (month && !months.some((s) => s.dataset.month === month) && !main.dataset.query) reload = true;
-        clearTimeout(wait);
-        wait = setTimeout(apply, 800); // a phone sends many at once: one fetch for the lot
+        if (month) named.add(month);
+        else all = true;
+        if (!wait) wait = setTimeout(apply, Math.max(800, last + 5000 - Date.now())); // a phone sends many at once: one fetch for the lot
       });
     }
   }

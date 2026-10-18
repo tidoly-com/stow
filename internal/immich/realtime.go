@@ -133,8 +133,8 @@ func (s *Server) socket(w http.ResponseWriter, r *http.Request, sess session) {
 }
 
 // WebEvents follows one person's changes for the web pages, which have no socket.io: each is a line of
-// JSON with the event's name and, for a photo just made ready, its month ("2006-01"), so that a page can
-// fetch that month again. stop ends it.
+// JSON with the event's name and, for a photo made ready or read further, its month ("2006-01"), so that a
+// page can fetch that month again. stop ends it.
 func (s *Server) WebEvents(userID string) (events <-chan string, stop func()) {
 	in := s.hub.join(userID)
 	out := make(chan string, 16)
@@ -152,7 +152,8 @@ func (s *Server) WebEvents(userID string) (events <-chan string, stop func()) {
 				}
 				var name, month string
 				json.Unmarshal(ev[0], &name)
-				if name == "AssetUploadReadyV2" && len(ev) > 1 {
+				switch {
+				case name == "AssetUploadReadyV2" && len(ev) > 1:
 					var ready struct {
 						Asset struct {
 							LocalDateTime string `json:"localDateTime"`
@@ -160,6 +161,17 @@ func (s *Server) WebEvents(userID string) (events <-chan string, stop func()) {
 					}
 					if json.Unmarshal(ev[1], &ready) == nil && len(ready.Asset.LocalDateTime) >= 7 {
 						month = ready.Asset.LocalDateTime[:7]
+					}
+				case name == "on_asset_update" && len(ev) > 1:
+					// one photo read further (its place, its faces): its month, so that a page does not fetch
+					// every month it shows each time — while a large folder is read, these never stop
+					var one struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(ev[1], &one) == nil && one.ID != "" {
+						if a, err := s.store.AssetByID(context.Background(), one.ID); err == nil {
+							month = assetMonth(a)
+						}
 					}
 				}
 				line, _ := json.Marshal(map[string]string{"event": name, "month": month})
@@ -172,4 +184,15 @@ func (s *Server) WebEvents(userID string) (events <-chan string, stop func()) {
 	}()
 	var once sync.Once
 	return out, func() { once.Do(func() { close(done); s.hub.leave(userID, in) }) }
+}
+
+// assetMonth is the month a photo is filed under on the pages: the clock where it was taken, else the file's day.
+func assetMonth(a store.Asset) string {
+	if a.Meta != nil && len(a.Meta.LocalTime) >= 7 {
+		return a.Meta.LocalTime[:7]
+	}
+	if len(a.FileCreatedAt) >= 7 {
+		return a.FileCreatedAt[:7]
+	}
+	return ""
 }

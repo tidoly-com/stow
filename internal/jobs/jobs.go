@@ -94,9 +94,24 @@ func (r *Runner) work(ctx context.Context, kinds []string) {
 		if jobErr != nil {
 			log.Printf("jobs: %s for %s failed (attempt %d): %v", job.Kind, job.AssetID, job.Attempts, jobErr)
 		}
-		if err := r.store.FinishJob(ctx, job, jobErr, maxAttempts); err != nil {
-			log.Printf("jobs: finish: %v", err)
-		}
+		r.finish(ctx, job, jobErr)
 		r.Wake() // let an idle worker look too
+	}
+}
+
+// finish records how a job went, trying again until it is written: a job left "running" is done by no one
+// until the next start, and keeps the work from ever reading as all done.
+func (r *Runner) finish(ctx context.Context, job store.Job, jobErr error) {
+	for wait := time.Second; ; wait = min(2*wait, time.Minute) {
+		err := r.store.FinishJob(ctx, job, jobErr, maxAttempts)
+		if err == nil || ctx.Err() != nil {
+			return // stopped: it stays "running" and the next start queues it again
+		}
+		log.Printf("jobs: finish %s for %s: %v — trying again in %v", job.Kind, job.AssetID, err, wait)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
 	}
 }
