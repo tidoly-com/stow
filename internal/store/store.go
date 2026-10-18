@@ -691,25 +691,25 @@ func (s *Store) AddJob(ctx context.Context, assetID, kind string) error {
 	return err
 }
 
-// UndatedEdits lists iPhone edited copies (IMG_E…) that were read without a capture time and are not
-// waiting to be read: read again, they take the original's.
-func (s *Store) UndatedEdits(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM assets a JOIN asset_exif e ON e.asset_id = a.id
-		WHERE a.original_name LIKE 'IMG\_E%' ESCAPE '\' AND e.taken_at IS NULL AND a.deleted_at IS NULL
+// Undated lists the photos read without a capture time that are not waiting to be read again: their id,
+// location, path and name, to tell which can be given a day now.
+func (s *Store) Undated(ctx context.Context) ([]Asset, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.location, a.path, a.original_name FROM assets a JOIN asset_exif e ON e.asset_id = a.id
+		WHERE e.taken_at IS NULL AND a.deleted_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset_id = a.id AND j.kind = 'metadata' AND j.state IN ('queued', 'running'))`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []string
+	var out []Asset
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var a Asset
+		if err := rows.Scan(&a.ID, &a.Location, &a.Path, &a.OriginalName); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, a)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
 // AssetsWithoutJob lists the assets that have no job of this kind waiting or running — or, with ever

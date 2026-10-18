@@ -419,15 +419,30 @@ func (s *Server) MakeThumbnail(ctx context.Context, assetID string) error {
 	return err
 }
 
-// QueueUndatedEdits reads again the iPhone edited copies read without a capture time — before copies took
-// the original's — so that they leave the day they were exported.
-func (s *Server) QueueUndatedEdits(ctx context.Context) (queued int, err error) {
-	ids, err := s.store.UndatedEdits(ctx)
+// namedPath is what a photo's day may be read from when the photo carries none: its path in someone's own
+// folder, which they named; for a photo taken in, only the name it came with — the folders above it are
+// this server's own (originals/<person>/<year>/<month>), made from the day it came.
+func (s *Server) namedPath(location, rel, name string) string {
+	if location != "" && s.lib.ReadOnly(location) {
+		return rel
+	}
+	return name
+}
+
+// QueueUndated reads again the photos read without a capture time that can now be given one: iPhone edited
+// copies, which take the original's, and photos whose name or folders tell their day — read before either
+// was done, they stayed on the day they were copied.
+func (s *Server) QueueUndated(ctx context.Context) (queued int, err error) {
+	undated, err := s.store.Undated(ctx)
 	if err != nil {
 		return 0, err
 	}
-	for _, id := range ids {
-		if err := s.store.AddJob(ctx, id, "metadata"); err != nil {
+	for _, a := range undated {
+		_, named := media.DateFromPath(s.namedPath(a.Location, a.Path, a.OriginalName), time.Local)
+		if !named && !appleEdit.MatchString(a.OriginalName) {
+			continue // read again, it would come out undated again
+		}
+		if err := s.store.AddJob(ctx, a.ID, "metadata"); err != nil {
 			return queued, err
 		}
 		queued++
@@ -710,6 +725,11 @@ func (s *Server) ReadMetadata(ctx context.Context, assetID string) error {
 	}
 	if info.Taken.IsZero() {
 		borrowFromOriginal(file, &info)
+	}
+	if info.Taken.IsZero() { // nothing in the photo: the day its name or folders tell, as the clock where it was filed
+		if t, ok := media.DateFromPath(s.namedPath(asset.Location, asset.Path, asset.OriginalName), time.Local); ok {
+			info.Taken, info.Wall = t, time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC)
+		}
 	}
 	meta := store.Meta{Width: info.Width, Height: info.Height, Orientation: info.Orientation, ISO: info.ISO,
 		Make: info.Make, Model: info.Model, Lens: info.Lens,
