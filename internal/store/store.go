@@ -271,7 +271,9 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("schema: %w", err)
 		}
 	}
-	// an index on a column that was added above cannot be made before it
+	// an index on a column that was added above cannot be made before it. It holds only the moving halves of
+	// live photos; a query uses it only when it says live_of != '' itself — without that, finding a photo's
+	// moving half read every photo, for every photo listed (a month of 11,000 took 50 s, 2026-10-18)
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assets_live ON assets(live_of) WHERE live_of != ''`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
@@ -568,7 +570,7 @@ func (s *Store) AddAsset(ctx context.Context, a *Asset, jobKinds []string) error
 
 const assetSelect = `SELECT a.id, a.owner_id, a.checksum, a.original_name, a.path, a.size, a.type, a.file_created_at, a.file_modified_at,
 	a.duration_ms, a.created_at, a.seq, coalesce(a.deleted_at, ''), a.favorite, a.shared, a.location, a.live_of,
-	coalesce((SELECT v.id FROM assets v WHERE v.live_of = a.id AND a.live_of = '' LIMIT 1), ''), e.asset_id, e.taken_at, e.local_time, e.zone_seconds, e.width, e.height, e.orientation,
+	coalesce((SELECT v.id FROM assets v WHERE v.live_of = a.id AND v.live_of != '' AND a.live_of = '' LIMIT 1), ''), e.asset_id, e.taken_at, e.local_time, e.zone_seconds, e.width, e.height, e.orientation,
 	e.make, e.model, e.lens, e.lat, e.lon, e.f_number, e.exposure_time, e.focal_length, e.iso, e.fps, e.city, e.state, e.country
 	FROM assets a LEFT JOIN asset_exif e ON e.asset_id = a.id`
 
@@ -1375,7 +1377,7 @@ type Sibling struct {
 // Siblings lists the owner's files in one location whose path is stem plus a dot and an ending.
 func (s *Store) Siblings(ctx context.Context, ownerID, location, stem string) ([]Sibling, error) {
 	like := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(stem) + `.%`
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id AND v.live_of != '')
 		FROM assets a WHERE a.owner_id = ? AND a.location = ? AND a.path LIKE ? ESCAPE '\'`, ownerID, location, like)
 	if err != nil {
 		return nil, err
