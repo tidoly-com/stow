@@ -155,9 +155,20 @@
     // yet means the page itself is. While a photo is open or some are chosen, it waits. Only the months
     // named are fetched, and no more often than every few seconds: while thousands of photos are being
     // read, the news never stops, and fetching every month on the page each time kept a laptop's disk busy.
+    // A month the page lacks may not belong here at all (a photo of another place, or another person's,
+    // on a narrowed page): the page is asked first for its months, at most twice a minute, and reloaded
+    // only when there is a new one — reloading on the news alone did so every two seconds, for ever.
     if (window.EventSource) {
-      let wait = null, reload = false, all = false, last = 0;
+      let wait = null, reload = false, all = false, last = 0, checked = 0;
       const named = new Set();
+      const lookForNewMonths = () => fetch(location.pathname + location.search, { credentials: "same-origin" })
+        .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+        .then((html) => {
+          const have = new Set(months.map((s) => s.dataset.month));
+          const page = new DOMParser().parseFromString(html, "text/html");
+          if (Array.from(page.querySelectorAll("section[data-month]")).some((s) => !have.has(s.dataset.month))) location.reload();
+        })
+        .catch(() => {});
       const refetch = (section) => fetch("/web/month/" + section.dataset.month + (main.dataset.query || location.search), { credentials: "same-origin" })
         .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
         .then((html) => { if (section.dataset.loaded) { const box = section.querySelector(".days"); box.innerHTML = html; dress(box); } })
@@ -165,7 +176,11 @@
       const apply = () => {
         wait = null;
         if ((viewer && viewer.open) || picked.size) { wait = setTimeout(apply, 2000); return; }
-        if (reload) return location.reload();
+        if (reload) {
+          const left = checked + 30000 - Date.now();
+          if (left <= 0) { reload = false; checked = Date.now(); lookForNewMonths(); }
+          else wait = setTimeout(apply, Math.min(left, 5000)); // the months named meanwhile still come every few seconds
+        }
         months.forEach((s) => { if (s.dataset.loaded && (all || named.has(s.dataset.month))) refetch(s); });
         named.clear();
         all = false;
