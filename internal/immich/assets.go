@@ -755,6 +755,11 @@ func (s *Server) ReadMetadata(ctx context.Context, assetID string) error {
 		s.runner.Wake()
 	}
 	if asset.Type == "IMAGE" && asset.LiveOf == "" && asset.DeletedAt == "" {
+		read := asset
+		read.Meta = &meta
+		if err := s.fileScreenshot(ctx, read); err != nil {
+			return err
+		}
 		if err := s.queueCoupon(ctx, assetID, info.Make); err != nil {
 			return err
 		}

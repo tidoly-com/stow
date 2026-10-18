@@ -141,6 +141,9 @@ CREATE TABLE IF NOT EXISTS coupons (  -- pictures the coupon job found to be cou
 	code     TEXT NOT NULL,   -- the barcode's text
 	expires  TEXT NOT NULL    -- the last day it can be used, 2026-12-31
 );
+CREATE TABLE IF NOT EXISTS screenshots (  -- pictures put in the screenshot album; once put, never put in again
+	asset_id TEXT PRIMARY KEY REFERENCES assets(id)
+);
 CREATE TABLE IF NOT EXISTS memories (  -- "N년 전 이달": for each person, one a day, of this month's photos from one earlier year
 	id         TEXT PRIMARY KEY,
 	owner_id   TEXT NOT NULL REFERENCES users(id),
@@ -2416,7 +2419,7 @@ func (s *Store) DeleteAsset(ctx context.Context, ownerID, assetID string) (Remov
 		return out, err
 	}
 	for _, q := range []string{`DELETE FROM album_assets WHERE asset_id = ?`, `DELETE FROM asset_exif WHERE asset_id = ?`, `DELETE FROM coupons WHERE asset_id = ?`, `DELETE FROM memory_assets WHERE asset_id = ?`,
-		`DELETE FROM shared_link_assets WHERE asset_id = ?`, `DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
+		`DELETE FROM shared_link_assets WHERE asset_id = ?`, `DELETE FROM screenshots WHERE asset_id = ?`, `DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
 		if _, err := tx.ExecContext(ctx, q, assetID); err != nil {
 			return out, err
 		}

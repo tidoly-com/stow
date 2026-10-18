@@ -195,7 +195,7 @@ func main() {
 	if err := api.LoadLocations(ctx); err != nil {
 		log.Fatalf("storage: %v", err)
 	}
-	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, Changed: api.Changed, Events: api.WebEvents,
+	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, ScreenshotsOn: api.ScreenshotsOn, SetScreenshots: api.SetScreenshots, Changed: api.Changed, Events: api.WebEvents,
 		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
 		TidolyHere: api.TidolyHere,
@@ -232,6 +232,13 @@ func main() {
 	} else if n > 0 {
 		log.Printf("coupons: %d pictures not looked at yet, queued", n)
 	}
+	go func() { // pictures read before screenshots were gathered, or while it was switched off
+		if n, err := api.FileScreenshots(ctx); err != nil {
+			log.Printf("screenshots: %v", err)
+		} else if n > 0 {
+			log.Printf("screenshots: %d put in the album", n)
+		}
+	}()
 	if n, err := api.QueueUndated(ctx); err != nil {
 		log.Printf("undated photos: %v", err)
 	} else if n > 0 {
