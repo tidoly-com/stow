@@ -73,3 +73,40 @@ func TestAskedJobsGoFirst(t *testing.T) {
 		t.Errorf("plan: %s", detail)
 	}
 }
+
+// A small picture that could not be made is not tried again at the next start, and the same failure added
+// again by earlier versions at each start is kept once: three broken files showed as fifteen failures.
+func TestAFailedJobIsNotQueuedAgainAtEachStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stow.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	u, err := s.UpsertUser(ctx, "sub-owner", "owner@example.com", "owner", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"broken", "fine"} {
+		if err := s.AddAsset(ctx, &Asset{ID: id, OwnerID: u.ID, Checksum: []byte(id), OriginalName: id + ".heic", Path: id + ".heic", Type: "IMAGE"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 { // as each start did before
+		s.db.Exec(`INSERT INTO jobs (asset_id, kind, state, error) VALUES ('broken', 'thumbnail', 'failed', 'cannot open')`)
+	}
+	ids, err := s.AssetsWithoutJob(ctx, "thumbnail", false)
+	if err != nil || strings.Join(ids, " ") != "fine" {
+		t.Errorf("without a thumbnail job: %v %v — the broken one has given up already", ids, err)
+	}
+	s.Close()
+	if s, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var n int
+	s.db.QueryRow(`SELECT count(*) FROM jobs WHERE asset_id = 'broken' AND state = 'failed'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("%d failures kept for one file, want 1", n)
+	}
+}

@@ -57,7 +57,7 @@ func TestUndatedPhotosTakeTheDayTheirNameOrFolderTells(t *testing.T) {
 	if got := day(byName["Screenshot_20231215-093011.jpg"]); got != "2023-12-15" {
 		t.Errorf("screenshot name: %s", got)
 	}
-	if got, today := day(byName["DCIM/IMG_0001.JPG"]), time.Now().Format("2006-01-02"); got != today { // nothing to tell: the file's own day
+	if got, today := day(byName["DCIM/IMG_0001.JPG"]), time.Now().UTC().Format("2006-01-02"); got != today { // nothing to tell: the file's own day, kept in UTC
 		t.Errorf("no date anywhere: %s, want the file's day %s", got, today)
 	}
 	for asset, want := range map[string]string{named["id"].(string): "2019-01-02", plain["id"].(string): "2026-09-25"} {
