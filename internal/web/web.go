@@ -858,12 +858,15 @@ func (w *Web) photo(rw http.ResponseWriter, r *http.Request, user store.User) {
 	if !mine {
 		place = "" // the places are of one's own photos; there is nothing of this one to go to
 	}
-	// zoomed in, the page swaps the preview for the file itself — when it is of a kind browsers show
-	full := false
+	// zoomed in, the page swaps the preview for the file itself — when it is of a kind browsers show — or,
+	// for HEIC, for a full-size JPEG the server makes the first time it is asked (stow issue #3)
+	full := ""
 	if asset.Type != "VIDEO" && asset.DeletedAt == "" {
 		switch strings.ToLower(path.Ext(asset.OriginalName)) {
 		case ".jpg", ".jpeg", ".png", ".webp", ".gif":
-			full = true
+			full = "/api/assets/" + asset.ID + "/original"
+		case ".heic", ".heif":
+			full = "/api/assets/" + asset.ID + "/full"
 		}
 	}
 	people, _ := w.Store.PeopleIn(ctx, user.ID, asset.ID) // none for someone else's photo

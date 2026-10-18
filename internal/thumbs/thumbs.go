@@ -1,6 +1,7 @@
 // Package thumbs makes the two small pictures the apps show instead of the original: a thumbnail for
 // grids and a preview for looking at one photo. They are made once, after upload, and kept under
-// derived/ — a folder that can be deleted and made again.
+// derived/ — a folder that can be deleted and made again. A HEIC photo someone zooms into also gets a
+// full-size JPEG there, made the first time it is asked for, since browsers cannot show the original.
 //
 // JPEG and PNG are decoded here. HEIC photos and videos need ffmpeg to get a picture out of them; without
 // it they simply have no small pictures.
@@ -39,7 +40,7 @@ type Maker struct {
 	FFmpeg string // path to ffmpeg, or empty
 }
 
-// Path is where a small picture of an asset lives; size is "thumbnail" or "preview".
+// Path is where a small picture of an asset lives; size is "thumbnail", "preview" or "full".
 func (m *Maker) Path(assetID, size string) string {
 	return filepath.Join(m.Dir, assetID[:2], assetID+"-"+size+".jpg")
 }
@@ -82,7 +83,7 @@ func (m *Maker) Crop(src, dst string, x1, y1, x2, y2 int) error {
 
 // Remove deletes whatever small pictures exist under an id — an asset's, or a person's.
 func (m *Maker) Remove(id string) {
-	for _, size := range []string{"thumbnail", "preview", "person"} {
+	for _, size := range []string{"thumbnail", "preview", "full", "person"} {
 		os.Remove(m.Path(id, size))
 	}
 }
@@ -150,12 +151,40 @@ func (m *Maker) Make(ctx context.Context, src, assetID string, info media.Info) 
 // frameArgs ask ffmpeg for one picture, on one thread: left to itself ffmpeg takes every core, and with a
 // job runner of several workers each starting one, a laptop sat at a load of 85 with the photo pages
 // taking 7 s to answer (2026-10-18). The workers are what runs several at once.
-func frameArgs(src string, at time.Duration) []string {
+func frameArgs(src string, at time.Duration, out string) []string {
 	args := []string{"-v", "error", "-nostdin", "-threads", "1", "-filter_threads", "1"}
 	if at > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(at.Seconds(), 'f', 3, 64))
 	}
-	return append(args, "-i", src, "-frames:v", "1", "-threads", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "2", "pipe:1")
+	return append(args, "-i", src, "-frames:v", "1", "-threads", "1", "-f", "image2pipe", "-c:v", "mjpeg", "-q:v", "2", out)
+}
+
+// MakeFull writes a JPEG of a HEIC photo at its own size, for looking closer in a browser. ffmpeg writes
+// it straight to the file: the picture is never decoded in this program, so its memory does not grow
+// with the photo (an iPhone's 48 MP is 190 MB as pixels).
+func (m *Maker) MakeFull(ctx context.Context, src, assetID string) error {
+	if m.FFmpeg == "" {
+		return ErrNoDecoder
+	}
+	dst := m.Path(assetID, "full")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	tmp := dst + ".tmp"
+	var errOut bytes.Buffer
+	cmd := exec.CommandContext(ctx, m.FFmpeg, append([]string{"-y"}, frameArgs(src, 0, tmp)...)...)
+	cmd.Stderr = &errOut
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg: %v", err)
+	}
+	behind(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("ffmpeg: %v: %.200s", err, errOut.String())
+	}
+	return os.Rename(tmp, dst) // a reader never sees half a picture
 }
 
 // frame asks ffmpeg for one picture from a HEIC photo or a video, behind the pages people are looking at.
@@ -166,7 +195,7 @@ func (m *Maker) frame(ctx context.Context, src string, at time.Duration) (image.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var out, errOut bytes.Buffer
-	cmd := exec.CommandContext(ctx, m.FFmpeg, frameArgs(src, at)...)
+	cmd := exec.CommandContext(ctx, m.FFmpeg, frameArgs(src, at, "pipe:1")...)
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("ffmpeg: %v", err)

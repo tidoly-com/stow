@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, id);
 CREATE INDEX IF NOT EXISTS jobs_asset ON jobs(asset_id, kind); -- finding the photos a kind of job was never done for, at every start
+CREATE INDEX IF NOT EXISTS jobs_kind ON jobs(kind, state, id); -- an asked-for job is found without going through the whole queue
 CREATE TABLE IF NOT EXISTS sync_acks (
 	token_hash BLOB NOT NULL,
 	type       TEXT NOT NULL,
@@ -694,6 +696,17 @@ func (s *Store) AddJob(ctx context.Context, assetID, kind string) error {
 	return err
 }
 
+// AskJob queues a job someone is waiting on, unless one is waiting, running or has given up already: it
+// answers with that one's state, or "queued" for the one it added. Such jobs go before the rest (ClaimJob).
+func (s *Store) AskJob(ctx context.Context, assetID, kind string) (state string, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE asset_id = ? AND kind = ? AND state IN ('queued', 'running', 'failed')
+		ORDER BY id DESC LIMIT 1`, assetID, kind).Scan(&state)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return state, err
+	}
+	return "queued", s.AddJob(ctx, assetID, kind)
+}
+
 // Undated lists the photos read without a capture time that are not waiting to be read again: their id,
 // location, path and name, to tell which can be given a day now.
 func (s *Store) Undated(ctx context.Context) ([]Asset, error) {
@@ -761,8 +774,21 @@ func (s *Store) RequeueRunning(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// ClaimJob hands out the oldest queued job of one of the given kinds; sql.ErrNoRows when there is none.
+// AskedKind is the job someone waits on with the page open — a full-size picture to zoom into. It goes
+// before the rest: behind a folder of 20,000 photos being read, it would come hours later.
+const AskedKind = "full"
+
+// ClaimJob hands out the oldest queued job of one of the given kinds, one asked for first (AskedKind);
+// sql.ErrNoRows when there is none.
 func (s *Store) ClaimJob(ctx context.Context, kinds []string) (j Job, err error) {
+	if slices.Contains(kinds, AskedKind) {
+		err = s.db.QueryRowContext(ctx, `UPDATE jobs SET state = 'running', attempts = attempts + 1
+			WHERE id = (SELECT id FROM jobs WHERE state = 'queued' AND kind = '`+AskedKind+`' ORDER BY id LIMIT 1)
+			RETURNING id, asset_id, kind, attempts`).Scan(&j.ID, &j.AssetID, &j.Kind, &j.Attempts)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return
+		}
+	}
 	marks := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
 	args := make([]any, len(kinds))
 	for i, k := range kinds {
