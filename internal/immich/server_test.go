@@ -143,6 +143,7 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)
 	runner.Handle("thumbnail", api.MakeThumbnail)
+	runner.Handle(store.AskedKind, api.MakeFull)
 	if withFaces {
 		runner.Handle("face", api.FindFaces)
 		if _, err := api.QueueMissingFaces(ctx); err != nil {

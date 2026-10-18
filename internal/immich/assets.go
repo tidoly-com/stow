@@ -384,6 +384,54 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset st
 	s.serveOriginal(w, r, asset)
 }
 
+// NeedsFull tells a photo whose original browsers cannot show (HEIC): to look closer, a full-size JPEG is
+// made from it the first time someone zooms in (stow issue #3).
+func NeedsFull(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".heic", ".heif":
+		return true
+	}
+	return false
+}
+
+// serveFull sends the full-size JPEG of a HEIC photo. The first time, it asks for one to be made and
+// answers 202: the page keeps showing the preview and asks again. It is made by the job runner, so that
+// many photos zoomed into at once decode no more at a time than there are workers.
+func (s *Server) serveFull(w http.ResponseWriter, r *http.Request, asset store.Asset) {
+	if f, err := os.Open(s.cfg.Thumbs.Path(asset.ID, "full")); err == nil {
+		defer f.Close()
+		stat, _ := f.Stat()
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		http.ServeContent(w, r, asset.ID+".jpg", stat.ModTime(), f)
+		return
+	}
+	if asset.Type != "IMAGE" || !NeedsFull(asset.OriginalName) || s.cfg.Thumbs.FFmpeg == "" {
+		writeError(w, 404, "Not found")
+		return
+	}
+	state, err := s.store.AskJob(r.Context(), asset.ID, store.AskedKind)
+	if err != nil {
+		writeError(w, 500, "Internal error")
+		return
+	}
+	if state == "failed" {
+		writeError(w, 404, "Not found") // it could not be made; the preview is what there is
+		return
+	}
+	s.runner.Wake()
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// MakeFull is the "full" job: the full-size JPEG of a HEIC photo someone zoomed into.
+func (s *Server) MakeFull(ctx context.Context, assetID string) error {
+	asset, err := s.store.AssetByID(ctx, assetID)
+	if err != nil {
+		return err
+	}
+	return s.cfg.Thumbs.MakeFull(ctx, s.lib.Path(asset.Location, asset.Path), assetID)
+}
+
 // MakeThumbnail is the "thumbnail" job: make the small pictures, then tell the person's devices that the
 // photo is in the library and ready to show (stow issue #7). The devices are told even if no picture
 // could be made — the photo is stored either way.

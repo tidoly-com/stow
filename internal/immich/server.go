@@ -146,6 +146,7 @@ func New(cfg Config, st *store.Store, lib *library.Library, runner *jobs.Runner)
 	m.HandleFunc("GET /api/assets/{id}", s.authed(s.assetInfo))
 	m.HandleFunc("GET /api/assets/{id}/thumbnail", s.photo(s.serveThumbnail, false))
 	m.HandleFunc("GET /api/assets/{id}/original", s.photo(s.serveOriginal, true))
+	m.HandleFunc("GET /api/assets/{id}/full", s.photo(s.serveFull, true)) // ours, not the app's: the original's pixels, so only where the original may go
 	m.HandleFunc("GET /api/assets/{id}/video/playback", s.photo(s.serveOriginal, false))
 	m.HandleFunc("GET /api/shared-links", s.authed(s.linkList))
 	m.HandleFunc("POST /api/shared-links", s.authed(s.linkCreate))

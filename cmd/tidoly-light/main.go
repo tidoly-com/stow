@@ -207,6 +207,7 @@ func main() {
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)
 	runner.Handle("thumbnail", api.MakeThumbnail)
+	runner.Handle(store.AskedKind, api.MakeFull)
 	if helper != nil || helperLater != nil {
 		runner.Handle("face", api.FindFaces)
 	}

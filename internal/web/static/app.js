@@ -497,10 +497,20 @@
       img.style.transform = zoom.s === 1 ? "" : "translate(" + zoom.x + "px, " + zoom.y + "px) scale(" + zoom.s + ")";
       viewer.classList.toggle("zoomed", zoom.s > 1);
       if (zoom.s > 1 && img.dataset.full) {
-        const full = new Image();
-        full.onload = () => { if (img.isConnected) img.src = full.src; };
-        full.src = img.dataset.full;
+        // a HEIC photo's full-size picture may still be in the making (202): ask again a little later,
+        // while this photo is still the one shown, and meanwhile go on zooming the preview
+        const url = img.dataset.full;
         delete img.dataset.full;
+        const swap = () => {
+          const full = new Image();
+          full.onload = () => { if (img.isConnected) img.src = full.src; };
+          full.src = url;
+        };
+        const ask = (tries) => fetch(url, { method: "HEAD", credentials: "same-origin" }).then((res) => {
+          if (res.status === 202 && tries > 0 && img.isConnected) setTimeout(() => ask(tries - 1), 1500);
+          else if (res.ok && res.status !== 202) swap();
+        }).catch(() => {});
+        if (url.endsWith("/full")) ask(80); else swap();
       }
     };
     const zoomTo = (scale, atX, atY) => {
