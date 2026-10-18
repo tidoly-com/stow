@@ -848,7 +848,7 @@ func (s *Store) HasFaces(ctx context.Context, assetID string) (bool, error) {
 // FaceDescriptions returns every face of one person's library with its description, for comparing a new
 // face against. Only id, person and description are filled in.
 func (s *Store) FaceDescriptions(ctx context.Context, ownerID string) ([]Face, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, coalesce(person_id, ''), embedding FROM faces WHERE owner_id = ?`, ownerID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, asset_id, coalesce(person_id, ''), embedding FROM faces WHERE owner_id = ?`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +857,7 @@ func (s *Store) FaceDescriptions(ctx context.Context, ownerID string) ([]Face, e
 	for rows.Next() {
 		var f Face
 		var raw []byte
-		if err := rows.Scan(&f.ID, &f.PersonID, &raw); err != nil {
+		if err := rows.Scan(&f.ID, &f.AssetID, &f.PersonID, &raw); err != nil {
 			return nil, err
 		}
 		f.Embedding = unpackFloats(raw)
@@ -2320,6 +2320,92 @@ func (s *Store) TrashedAssets(ctx context.Context, ownerID string, limit int) ([
 	return out, rows.Err()
 }
 
+// forgetFaces removes a photo's faces in tx; a person left with none goes too, and one whose shown face
+// went shows another. people gets, for each person changed, the face to show now or "" if gone.
+func forgetFaces(ctx context.Context, tx *sql.Tx, assetID string, gone func(kind, a, b string) error, changed map[string]string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, coalesce(person_id, '') FROM faces WHERE asset_id = ?`, assetID)
+	if err != nil {
+		return err
+	}
+	var faceIDs []string
+	people := map[string]bool{}
+	for rows.Next() {
+		var faceID, personID string
+		if err := rows.Scan(&faceID, &personID); err != nil {
+			rows.Close()
+			return err
+		}
+		faceIDs = append(faceIDs, faceID)
+		if personID != "" {
+			people[personID] = true
+		}
+	}
+	rows.Close()
+	for _, faceID := range faceIDs {
+		if err := gone("face", faceID, ""); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE asset_id = ?`, assetID); err != nil {
+		return err
+	}
+	for personID := range people {
+		var shown string
+		var next sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT p.face_id, (SELECT id FROM faces WHERE person_id = p.id ORDER BY (x2 - x1) DESC LIMIT 1) FROM persons p WHERE p.id = ?`, personID).Scan(&shown, &next); err != nil {
+			return err
+		}
+		seq, err := nextSeq(ctx, tx)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !next.Valid: // nobody left to show
+			if _, err := tx.ExecContext(ctx, `DELETE FROM persons WHERE id = ?`, personID); err != nil {
+				return err
+			}
+			if err := gone("person", personID, ""); err != nil {
+				return err
+			}
+			changed[personID] = ""
+		default:
+			stillThere := 0
+			tx.QueryRowContext(ctx, `SELECT count(*) FROM faces WHERE id = ?`, shown).Scan(&stillThere)
+			if stillThere == 0 {
+				shown = next.String
+				changed[personID] = shown
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE persons SET face_id = ?, updated_at = ?, seq = ? WHERE id = ?`, shown, Timestamp(time.Now()), seq, personID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ForgetFaces removes the faces found in one of the owner's photos, so that they can be looked for again:
+// for each person changed, the face to show now, or "" if the person is gone.
+func (s *Store) ForgetFaces(ctx context.Context, ownerID, assetID string) (map[string]string, error) {
+	changed := map[string]string{}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return changed, err
+	}
+	defer tx.Rollback()
+	gone := func(kind, a, b string) error {
+		seq, err := nextSeq(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO deletions (seq, owner_id, kind, a, b) VALUES (?,?,?,?,?)`, seq, ownerID, kind, a, b)
+		return err
+	}
+	if err := forgetFaces(ctx, tx, assetID, gone, changed); err != nil {
+		return changed, err
+	}
+	return changed, tx.Commit()
+}
+
 // ── deleting ────────────────────────────────────────────────────────────────────────────────────────────────
 
 // Removed is what is left to clean up on disk after a photo's record is gone.
@@ -2352,62 +2438,8 @@ func (s *Store) DeleteAsset(ctx context.Context, ownerID, assetID string) (Remov
 		return err
 	}
 	// faces, and the people they belonged to
-	rows, err := tx.QueryContext(ctx, `SELECT id, coalesce(person_id, '') FROM faces WHERE asset_id = ?`, assetID)
-	if err != nil {
+	if err := forgetFaces(ctx, tx, assetID, gone, out.People); err != nil {
 		return out, err
-	}
-	var faceIDs []string
-	people := map[string]bool{}
-	for rows.Next() {
-		var faceID, personID string
-		if err := rows.Scan(&faceID, &personID); err != nil {
-			rows.Close()
-			return out, err
-		}
-		faceIDs = append(faceIDs, faceID)
-		if personID != "" {
-			people[personID] = true
-		}
-	}
-	rows.Close()
-	for _, faceID := range faceIDs {
-		if err := gone("face", faceID, ""); err != nil {
-			return out, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE asset_id = ?`, assetID); err != nil {
-		return out, err
-	}
-	for personID := range people {
-		var shown string
-		var next sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT p.face_id, (SELECT id FROM faces WHERE person_id = p.id ORDER BY (x2 - x1) DESC LIMIT 1) FROM persons p WHERE p.id = ?`, personID).Scan(&shown, &next); err != nil {
-			return out, err
-		}
-		seq, err := nextSeq(ctx, tx)
-		if err != nil {
-			return out, err
-		}
-		switch {
-		case !next.Valid: // nobody left to show
-			if _, err := tx.ExecContext(ctx, `DELETE FROM persons WHERE id = ?`, personID); err != nil {
-				return out, err
-			}
-			if err := gone("person", personID, ""); err != nil {
-				return out, err
-			}
-			out.People[personID] = ""
-		default:
-			stillThere := 0
-			tx.QueryRowContext(ctx, `SELECT count(*) FROM faces WHERE id = ?`, shown).Scan(&stillThere)
-			if stillThere == 0 {
-				shown = next.String
-				out.People[personID] = shown
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE persons SET face_id = ?, updated_at = ?, seq = ? WHERE id = ?`, shown, Timestamp(time.Now()), seq, personID); err != nil {
-				return out, err
-			}
-		}
 	}
 	// albums it was in count as changed
 	seq, err := nextSeq(ctx, tx)
