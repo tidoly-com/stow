@@ -2198,6 +2198,20 @@ func TestAFolderIsReadWhereItLies(t *testing.T) {
 		t.Errorf("after deleting a.jpg from the library and looking again: %v", got)
 	}
 
+	// the copy of a photo the library has is read once: looked at again, it is known by its size and time
+	// alone — made unreadable, it still counts as the same photo
+	if copies, _ := e.store.Copies(ctx, id[1]); len(copies) != 1 || copies["copy-of-the-phone-photo.jpg"].Size == 0 {
+		t.Errorf("copies noted: %v", copies)
+	}
+	unreadable := filepath.Join(folder, "copy-of-the-phone-photo.jpg")
+	os.Chmod(unreadable, 0)
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	os.Chmod(unreadable, 0o644)
+	if _, page := e.browse("/admin", owner); !strings.Contains(page, "이미 있던 사진 1") {
+		t.Error("looked at again, the copy was read through rather than known by its size and time")
+	}
+
 	// the folder changes: a new file comes in, a file that is gone leaves
 	put("c.jpg", mediatest.JPEG(mediatest.Camera.Bytes(), 440, 300))
 	os.Remove(filepath.Join(folder, "trip", "b.jpg"))
