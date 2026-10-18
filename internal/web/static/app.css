@@ -440,7 +440,8 @@ html:has(dialog[open]) { overflow: hidden; } /* a layer open: it scrolls, the pa
 
 /* Shared links: the page someone without an account opens, one photo of it, and the person's own list. */
 .share-top { justify-content: flex-start; }
-main.share { padding-top: 8px; }
+main.share { max-width: 1200px; margin: 0 auto; padding: 8px 24px 64px; } /* no side menu here: nothing to leave room for */
+main.share-one { margin-left: 0; padding: 0; }
 main.share h1 + .dim { margin-top: -4px; margin-bottom: 18px; }
 .share-foot { padding: 28px 16px 36px; text-align: center; font-size: .8125rem; }
 .share-foot a { color: var(--muted-foreground); }
