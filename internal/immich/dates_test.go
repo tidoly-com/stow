@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,5 +65,25 @@ func TestUndatedPhotosTakeTheDayTheirNameOrFolderTells(t *testing.T) {
 		if got := day(a); got != want {
 			t.Errorf("taken in %s: %s, want %s", a.OriginalName, got, want)
 		}
+	}
+}
+
+// A GIF or WebP, which this server reads nothing from, still takes the day its name tells — before, it
+// stayed on the day the file was copied. Once read so, it is not read again at every start.
+func TestAPictureNotReadTakesTheDayItsNameTells(t *testing.T) {
+	e := start(t, t.TempDir(), newKey(t))
+	ctx := context.Background()
+	phone := e.login("owner@example.com", "owner")
+	_, gif := e.upload(phone, "Screenshot_20181201-101010.gif", []byte("GIF89a\x01\x00\x01\x00\x00\x00\x00;"))
+	e.settle()
+	a, err := e.store.AssetByID(ctx, gif["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Meta == nil || !strings.HasPrefix(a.Meta.LocalTime, "2018-12-01") {
+		t.Errorf("GIF named for 1 December 2018: %+v", a.Meta)
+	}
+	if n, err := e.api.QueueUndated(ctx); err != nil || n != 0 {
+		t.Errorf("read again at a start: %d, %v", n, err)
 	}
 }
