@@ -41,6 +41,9 @@ func hashPassword(password string) string {
 	return base64.RawStdEncoding.EncodeToString(salt) + "." + base64.RawStdEncoding.EncodeToString(key)
 }
 
+// HashPassword is a password as it is kept: an account's, or a shared link's.
+func HashPassword(password string) string { return hashPassword(password) }
+
 func passwordMatches(hash, password string) bool {
 	saltText, keyText, ok := strings.Cut(hash, ".")
 	salt, err1 := base64.RawStdEncoding.DecodeString(saltText)

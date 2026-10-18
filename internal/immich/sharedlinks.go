@@ -285,9 +285,6 @@ func (s *Server) linkAssets(add bool) func(http.ResponseWriter, *http.Request, s
 	}
 }
 
-// HashLinkPassword is a link's password as it is kept.
-func HashLinkPassword(password string) string { return hashPassword(password) }
-
 // ── opening a link ──────────────────────────────────────────────────────────────────────────────────────────
 
 // Link states, as the page that opens one shows them.

@@ -62,8 +62,22 @@ func main() {
 	name := flag.String("name", "", "what this server is called on the other devices in the house (default: this computer's name)")
 	inspect := flag.String("inspect", "", "print what this program reads from one photo or video, then exit")
 	updateURL := flag.String("update-url", "https://github.com/tidoly-com/stow/releases/latest/download", "where releases are downloaded from: latest.json, the app, SHA256SUMS")
+	ownerPassword := flag.Bool("owner-password", false, "ask on this terminal for a new password for the server's owner, set it, and exit — for a server with no browser of its own (\"sudo tidoly-stow password\")")
 	resetOwner := flag.Bool("reset-owner", false, "print a link, good once for 10 minutes and only in a browser on this PC, that sets the owner's password again; then exit")
 	flag.Parse()
+	if flag.Arg(0) == "password" { // sudo tidoly-stow password
+		*ownerPassword = true
+	}
+	if *ownerPassword {
+		if *configFile == "" && *dataDir == "data" {
+			*configFile = serviceConfig()
+		}
+		if err := setOwnerPassword(*configFile, *dataDir); err != nil {
+			fmt.Fprintln(os.Stderr, "tidoly stow:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *inspect != "" {
 		info, err := media.Read(*inspect, time.Local)
 		if err != nil {
@@ -185,7 +199,7 @@ func main() {
 		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
 		TidolyHere: api.TidolyHere,
-		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashLinkPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
+		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
 		SetAutoAdd: api.SetAutoAdd, Block: api.Block, Arrivals: api.Arrivals, SeenArrivals: api.SeenArrivals,
 		Contact:   *homeURL + "/contact",
 		AddFolder: api.AddFolder, PauseFolder: api.PauseFolder, ScanFolder: api.ScanFolder, RemoveFolder: api.RemoveFolder, FolderState: folderState(api), Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: immich.TrashDays}

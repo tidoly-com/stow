@@ -137,7 +137,7 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load()}, true
 		},
 		Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: TrashDays,
-		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashLinkPassword}}
+		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashPassword}}
 	api.Pages(pages.Handler(api.WebLoginStart, api.WebLogout))
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)
@@ -3053,7 +3053,7 @@ func TestTheHelpHasTheGuidesThePagesPointTo(t *testing.T) {
 	}
 	reset := "관리자 비밀번호 변경" // from the app's menu; Linux has no menu
 	if runtime.GOOS == "linux" {
-		reset = "tidoly-light -reset-owner"
+		reset = "sudo tidoly-stow password"
 	}
 	for _, want := range []string{`<h3 id="vpn">`, `href="#vpn"`, `id="password"`, reset, "Login with tidoly", "먼저 등록을 해제하세요", `id="outside"`, `href="/start/screen"`,
 		`href="` + testHome + `/contact" target="_blank"`, `data-copy="tidoly stow test-1 · `} {

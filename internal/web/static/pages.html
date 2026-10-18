@@ -174,7 +174,7 @@
 <h2 id="password">4. 비밀번호를 잊었을 때</h2>
 <ul>
 <li><b>가족</b> — 관리자가 관리 → 사용자에서 그 사람 줄의 "비밀번호 새로 정하기"로 정해 줍니다.</li>
-<li><b>관리자</b> — 사진이 있는 PC에서 {{if eq system "linux"}}<code>tidoly-light -reset-owner</code>를 실행해 나온 링크를 그 PC의 브라우저로 엽니다{{else}}{{template "app-bar"}} → <b>관리자 비밀번호 변경</b>을 누릅니다{{end}}. tidoly에 연결해 두었다면 밖 주소에서 tidoly로 로그인해 관리 → 사용자에서 바꿔도 됩니다.</li>
+<li><b>관리자</b> — 사진이 있는 PC에서 {{if eq system "linux"}}<code>sudo tidoly-stow password</code>를 실행해 새 비밀번호를 넣습니다{{else}}{{template "app-bar"}} → <b>관리자 비밀번호 변경</b>을 누릅니다{{end}}. tidoly에 연결해 두었다면 밖 주소에서 tidoly로 로그인해 관리 → 사용자에서 바꿔도 됩니다.</li>
 </ul>
 
 <h2 id="keep">5. 사진 보관과 옮기기</h2>

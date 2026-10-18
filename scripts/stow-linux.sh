@@ -58,6 +58,7 @@ fi
 rm -rf "$DIR"
 mv "$tmp/app/tidoly-stow" "$DIR"
 chmod -R a+rX "$DIR"
+ln -sf "$DIR/bin/tidoly-light" /usr/local/bin/tidoly-stow # "sudo tidoly-stow password" sets the owner's password again
 
 opts="-config $HOME_OF/.config/tidoly-stow/config.json -listen 0.0.0.0:30891"
 [ -x "$DIR/bin/stow-faces" ] && opts="$opts -face-helper $DIR/bin/stow-faces"
