@@ -7,7 +7,8 @@
 # dist/release/ 에:
 #   tidoly-stow-linux-amd64.tar.gz   tidoly-stow/bin/ tidoly-light(서버) · stow-faces + libonnxruntime.so(얼굴 도우미) · ffmpeg(LGPL)
 #                                    + LICENSES/
-#   stow-linux.sh                    설치 스크립트의 사본 — 시험용. 고객은 저장소의 원문 주소에서 읽는다
+#   stow-linux.sh                    설치 스크립트의 사본 — 관리 화면의 업데이트 단추가 이것을 받아 돌린다.
+#                                    처음 설치는 저장소의 원문 주소에서 읽는다
 #   SHA256SUMS                       맥 · 윈도 · 리눅스 배포물 모두의 체크섬
 #
 # 얼굴 도우미(cgo)와 ffmpeg 는 이 맥에서 zig(brew install zig)로 리눅스용을 굽는다 — 도우미는 glibc 2.28 이상,

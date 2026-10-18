@@ -2,7 +2,8 @@
 //
 // Every release carries latest.json — {"version": "v0.2.0"} — beside the app, at the address the install
 // scripts download from. The server looks once a day; a newer version is shown on the admin page, and
-// "업데이트" runs the same install the customer ran: download, checksum, quit the app, replace it, open it.
+// "업데이트" runs the same install the customer ran: download, checksum, quit the app, replace it, open it —
+// on Linux through a root service the install set up (install_linux.go).
 package update
 
 import (
@@ -105,6 +106,10 @@ func (c *Checker) setState(s string) {
 	c.mu.Unlock()
 }
 
+// ByButton says whether this system updates from the admin page's button; elsewhere the page shows how to
+// install by hand.
+func (c *Checker) ByButton() bool { return byButton() }
+
 // ErrByHand: on this system the update is not run from the app.
 var ErrByHand = errors.New("this system updates by hand")
 
@@ -113,7 +118,7 @@ func (c *Checker) Install(ctx context.Context) error {
 	if c.Newer() == "" {
 		return errors.New("no newer version")
 	}
-	cmd, err := install(ctx, strings.TrimRight(c.Base, "/"))
+	wait, err := install(ctx, strings.TrimRight(c.Base, "/"))
 	if err != nil {
 		return err
 	}
@@ -121,7 +126,7 @@ func (c *Checker) Install(ctx context.Context) error {
 	go func() {
 		// The install quits this program before it ends; when it ends with this program still here, it did
 		// not take.
-		err := cmd.Wait()
+		err := wait()
 		log.Printf("update: the install ended without replacing this program: %v", err)
 		c.setState(Failed)
 	}()

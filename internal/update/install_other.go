@@ -1,11 +1,10 @@
-//go:build !darwin && !windows
+//go:build !darwin && !windows && !linux
 
 package update
 
-import (
-	"context"
-	"os/exec"
-)
+import "context"
 
-// install: on Linux tidoly stow runs as a service, set up with sudo; the admin page shows the command.
-func install(context.Context, string) (*exec.Cmd, error) { return nil, ErrByHand }
+// install: elsewhere the admin page shows how to install by hand.
+func install(context.Context, string) (func() error, error) { return nil, ErrByHand }
+
+func byButton() bool { return false }
