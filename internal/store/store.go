@@ -710,10 +710,10 @@ func (s *Store) AskJob(ctx context.Context, assetID, kind string) (state string,
 	return "queued", s.AddJob(ctx, assetID, kind)
 }
 
-// Undated lists the photos read without a capture time that are not waiting to be read again: their id,
-// location, path and name, to tell which can be given a day now.
+// Undated lists the photos read without a capture time, or in a format not read at all (GIF, WebP), that
+// are not waiting to be read again: their id, location, path and name, to tell which can be given a day now.
 func (s *Store) Undated(ctx context.Context) ([]Asset, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.location, a.path, a.original_name FROM assets a JOIN asset_exif e ON e.asset_id = a.id
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.location, a.path, a.original_name FROM assets a LEFT JOIN asset_exif e ON e.asset_id = a.id
 		WHERE e.taken_at IS NULL AND a.deleted_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset_id = a.id AND j.kind = 'metadata' AND j.state IN ('queued', 'running'))`)
 	if err != nil {

@@ -769,16 +769,16 @@ func (s *Server) ReadMetadata(ctx context.Context, assetID string) error {
 	if err != nil {
 		return err
 	}
-	if info.Kind == "" {
-		return nil
-	}
-	if info.Taken.IsZero() {
+	if info.Kind != "" && info.Taken.IsZero() {
 		borrowFromOriginal(file, &info)
 	}
 	if info.Taken.IsZero() { // nothing in the photo: the day its name or folders tell, as the clock where it was filed
 		if t, ok := media.DateFromPath(s.namedPath(asset.Location, asset.Path, asset.OriginalName), time.Local); ok {
 			info.Taken, info.Wall = t, time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC)
 		}
+	}
+	if info.Kind == "" && info.Taken.IsZero() {
+		return nil // a format this server does not read (GIF, WebP), and no day in its name or folders either
 	}
 	meta := store.Meta{Width: info.Width, Height: info.Height, Orientation: info.Orientation, ISO: info.ISO,
 		Make: info.Make, Model: info.Model, Lens: info.Lens,
