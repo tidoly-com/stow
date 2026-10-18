@@ -435,19 +435,29 @@
     if (form) form.submit();
   });
 
-  // The work going on in the background: its part of the page is fetched again until nothing is left.
-  const refreshJobs = () => {
-    if (!document.querySelector("#jobs[data-working]")) return;
-    setTimeout(() => fetch(location.pathname, { credentials: "same-origin" })
-      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
-      .then((html) => {
-        const fresh = new DOMParser().parseFromString(html, "text/html").querySelector("#jobs");
-        if (fresh) document.querySelector("#jobs").replaceWith(fresh);
-      })
-      .catch(() => {}) // the server is busy or restarting: try again next time
-      .finally(refreshJobs), 5000);
+  // A part of the page that is still moving — the work in the background, a folder being looked at — is
+  // fetched again until it settles. Only that part: reloading the page would close a window opened on it.
+  const keepFresh = (selector, moving, every) => {
+    const tick = () => {
+      const part = document.querySelector(selector);
+      if (!part || !moving(part)) return;
+      setTimeout(() => {
+        if (sheet && sheet.open) return tick(); // choosing a folder, say: wait until it is closed
+        fetch(location.pathname + location.search, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+          .then((html) => {
+            const fresh = new DOMParser().parseFromString(html, "text/html").querySelector(selector);
+            const now = document.querySelector(selector);
+            if (fresh && now) now.replaceWith(fresh);
+          })
+          .catch(() => {}) // the server is busy or restarting: try again next time
+          .finally(tick);
+      }, every);
+    };
+    tick();
   };
-  refreshJobs();
+  keepFresh("#jobs", (part) => part.hasAttribute("data-working"), 5000);
+  keepFresh("#folders", (part) => part.querySelector("[data-running]"), 2000);
 
   // Choosing a folder on the server's machine, one step at a time.
   const browse = document.querySelectorAll("[data-browse]");
@@ -462,7 +472,6 @@
         if (!sheet.open) sheet.showModal();
       }, failed);
     browse.forEach((b) => b.addEventListener("click", () => { purpose = b.dataset.browse; next = b.dataset.next || ""; open(""); }));
-    if (document.querySelector("[data-running]")) setTimeout(() => location.reload(), 2000); // a folder is being looked at: show how far
     sheet.addEventListener("click", (event) => {
       if (!sheet.classList.contains("picker")) return;
       const button = event.target.closest("button");
