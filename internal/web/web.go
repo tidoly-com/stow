@@ -1233,25 +1233,70 @@ func drives() []drive {
 		}
 	default:
 		add("/")
-		for _, top := range []string{"/mnt", "/media", "/run/media"} {
-			entries, _ := os.ReadDir(top)
-			for _, e := range entries {
-				dir := filepath.Join(top, e.Name())
-				if same, _ := disk.Same(dir, "/"); same {
-					if inner, err := os.ReadDir(dir); err == nil { // /media/<user>/<disk>
-						for _, i := range inner {
-							if same, _ := disk.Same(filepath.Join(dir, i.Name()), "/"); !same {
-								add(filepath.Join(dir, i.Name()))
-							}
-						}
-					}
-					continue
-				}
-				add(dir)
-			}
+		mounts, _ := os.ReadFile("/proc/self/mounts")
+		for _, dir := range diskMounts(string(mounts)) {
+			add(dir)
 		}
 	}
 	return out
+}
+
+// diskMounts are the places Linux has mounted a disk other than the root's: from /proc/self/mounts, each
+// disk once (where it is mounted nearest the root), disks only — not the system's own (/boot, snaps,
+// containers). A second disk is often mounted where its owner chose, /data say, not under /mnt or /media
+// (2026-10-18).
+func diskMounts(mounts string) []string {
+	kinds := map[string]bool{"ext2": true, "ext3": true, "ext4": true, "xfs": true, "btrfs": true, "zfs": true, "f2fs": true,
+		"ntfs": true, "ntfs3": true, "fuseblk": true, "exfat": true, "vfat": true, "hfsplus": true, "jfs": true, "reiserfs": true}
+	unescape := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+	root := ""
+	at := map[string]string{} // disk → where it is mounted nearest the root
+	var order []string
+	for _, line := range strings.Split(mounts, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || !kinds[f[2]] || (!strings.HasPrefix(f[0], "/dev/") && f[2] != "zfs") {
+			continue
+		}
+		src, dir := f[0], unescape.Replace(f[1])
+		if dir == "/" {
+			root = src
+			continue
+		}
+		system := false
+		for _, p := range []string{"/boot", "/snap", "/var/lib", "/proc", "/sys", "/dev", "/run", "/efi", "/usr", "/opt", "/var/snap"} {
+			if dir == p || strings.HasPrefix(dir, p+"/") {
+				system = !strings.HasPrefix(dir, "/run/media/")
+			}
+		}
+		if system {
+			continue
+		}
+		if was, ok := at[src]; !ok {
+			at[src] = dir
+			order = append(order, src)
+		} else if len(dir) < len(was) {
+			at[src] = dir
+		}
+	}
+	var out []string
+	for _, src := range order {
+		if src != root {
+			out = append(out, at[src])
+		}
+	}
+	return out
+}
+
+// Roomiest is the drive with the most free space that photos can be put on, and how much is free; "" when
+// none is known. The setup offers it first when it has more room than the home folder's disk.
+func Roomiest() (string, int64) {
+	best, most := "", int64(-1)
+	for _, d := range drives() {
+		if d.free > most && disk.Writable(d.Path) {
+			best, most = d.Path, d.free
+		}
+	}
+	return best, most
 }
 
 // roomy are the drives a place for photos can be added on: writable, with 1 GB free at least — not the

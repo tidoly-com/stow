@@ -29,6 +29,7 @@ import (
 
 	"github.com/tidoly-com/stow/internal/certs"
 	"github.com/tidoly-com/stow/internal/coupons"
+	"github.com/tidoly-com/stow/internal/disk"
 	"github.com/tidoly-com/stow/internal/faces"
 	"github.com/tidoly-com/stow/internal/immich"
 	"github.com/tidoly-com/stow/internal/install"
@@ -417,6 +418,17 @@ func suggestFolder() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
+	}
+	// Windows and Linux: a second disk with more room than the home folder's is where photos go best — a
+	// D: drive, a disk mounted at /data (2026-10-18). Not on the Mac: its other disks are mostly ones that
+	// get unplugged.
+	if runtime.GOOS != "darwin" {
+		if dir, free := web.Roomiest(); dir != "" {
+			_, homeFree, ok := disk.Space(home)
+			if same, err := disk.Same(dir, home); ok && free > homeFree && err == nil && !same {
+				return filepath.Join(dir, "stow")
+			}
+		}
 	}
 	if pictures := filepath.Join(home, "Pictures"); runtime.GOOS != "linux" || exists(pictures) {
 		return filepath.Join(pictures, "stow")

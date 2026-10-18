@@ -234,3 +234,24 @@ func TestInstallMakesANewFolder(t *testing.T) {
 		t.Fatalf("the new folder was not made: %v", err)
 	}
 }
+
+// On Linux every disk mounted outside the root's own is offered, wherever it is mounted — a second disk at
+// /data was missing (2026-10-18) — once each, and not the system's own mounts.
+func TestLinuxDisksAreFoundWhereverMounted(t *testing.T) {
+	mounts := `/dev/nvme0n1p2 / ext4 rw,relatime 0 0
+proc /proc proc rw 0 0
+/dev/nvme0n1p1 /boot/efi vfat rw 0 0
+/dev/nvme0n1p2 /var/lib/docker ext4 rw 0 0
+/dev/sda1 /data ext4 rw,relatime 0 0
+/dev/sda1 /data/stow/bind ext4 rw 0 0
+/dev/loop3 /snap/core/1 squashfs ro 0 0
+tmpfs /run tmpfs rw 0 0
+/dev/sdb1 /run/media/me/My\040Disk exfat rw 0 0
+/dev/sdc1 /mnt/backup ntfs3 rw 0 0
+//nas/photos /mnt/nas cifs rw 0 0
+`
+	got := strings.Join(diskMounts(mounts), " | ")
+	if want := "/data | /run/media/me/My Disk | /mnt/backup"; got != want {
+		t.Errorf("disks: %q, want %q", got, want)
+	}
+}
