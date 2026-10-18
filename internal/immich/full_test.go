@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"image/jpeg"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -92,5 +93,46 @@ func TestHEICZoomIsMadeOnceAndOnlyWhereTheOriginalMayGo(t *testing.T) {
 	}
 	if got := byKey(); got != 404 {
 		t.Errorf("a link that keeps originals back: %d", got)
+	}
+}
+
+// Before its small pictures are made, a photo's thumbnail stands in with the original — but not through a
+// shared link that keeps originals back: that one gets a blank until the small picture is there.
+func TestALinkThatKeepsOriginalsBackNeverSendsOneForAThumbnail(t *testing.T) {
+	e := start(t, t.TempDir(), newKey(t))
+	ctx := context.Background()
+	phone := e.login("owner@example.com", "owner")
+	original := mediatest.JPEG(nil, 400, 300)
+	_, a := e.upload(phone, "a.jpg", original)
+	e.settle()
+	id := a["id"].(string)
+	for _, size := range []string{"thumbnail", "preview"} { // as before the thumbnail job has run
+		os.Remove(e.api.cfg.Thumbs.Path(id, size))
+	}
+	if err := e.api.setLink(ctx, Link{Slug: testSlug, Host: testSlug + ".stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	status, raw := e.call("POST", "/api/shared-links", phone, map[string]any{"type": "INDIVIDUAL", "assetIds": []string{id}, "allowDownload": false})
+	var link map[string]any
+	json.Unmarshal(raw, &link)
+	key, _ := link["key"].(string)
+	if status != 201 || key == "" {
+		t.Fatalf("create: %d %s", status, raw)
+	}
+	for _, size := range []string{"", "?size=preview"} {
+		q := "?key=" + key
+		if size != "" {
+			q = size + "&key=" + key
+		}
+		res, body := e.browse("/api/assets/" + id + "/thumbnail" + q)
+		if res.StatusCode != 200 || len(body) >= len(original) || strings.Contains(body, string(original[:64])) {
+			t.Errorf("thumbnail%s through the link: %d, %d bytes — the original is %d", size, res.StatusCode, len(body), len(original))
+		}
+	}
+	res := e.do("GET", "/api/assets/"+id+"/thumbnail", phone, nil, "")
+	n, _ := io.Copy(io.Discard, res.Body)
+	res.Body.Close()
+	if n != int64(len(original)) {
+		t.Errorf("its owner, before the small picture is made: %d bytes, want the original's %d", n, len(original))
 	}
 }

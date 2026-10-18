@@ -368,8 +368,20 @@ func (s *Server) photo(send func(http.ResponseWriter, *http.Request, store.Asset
 			return
 		}
 		w.Header().Set("Referrer-Policy", "no-referrer") // the key is in the address
+		if !l.AllowDownload {
+			r = r.WithContext(context.WithValue(r.Context(), keepOriginalKey{}, true))
+		}
 		send(w, r, asset)
 	}
+}
+
+// keepOriginalKey marks a request through a shared link that keeps originals back: what stands in for a
+// small picture not made yet must not be the original then.
+type keepOriginalKey struct{}
+
+func keepsOriginal(r *http.Request) bool {
+	keep, _ := r.Context().Value(keepOriginalKey{}).(bool)
+	return keep
 }
 
 func (s *Server) photoFail(w http.ResponseWriter, err error) {
