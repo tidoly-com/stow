@@ -2211,6 +2211,21 @@ func TestAFolderIsReadWhereItLies(t *testing.T) {
 	if _, page := e.browse("/admin", owner); !strings.Contains(page, "이미 있던 사진 1") {
 		t.Error("looked at again, the copy was read through rather than known by its size and time")
 	}
+	// so is a photo twice in the folder itself, while the first stays where it is
+	put("trip/again/b.jpg", mediatest.JPEG(mediatest.Camera.Bytes(), 420, 300))
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	again := filepath.Join(folder, "trip", "again", "b.jpg")
+	os.Chmod(again, 0)
+	os.Chmod(unreadable, 0)
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	os.Chmod(again, 0o644)
+	os.Chmod(unreadable, 0o644)
+	if _, page := e.browse("/admin", owner); !strings.Contains(page, "이미 있던 사진 2") {
+		t.Error("looked at again, the second copy in the folder was read through rather than known by its size and time")
+	}
+	os.RemoveAll(filepath.Join(folder, "trip", "again"))
 
 	// the folder changes: a new file comes in, a file that is gone leaves
 	put("c.jpg", mediatest.JPEG(mediatest.Camera.Bytes(), 440, 300))
