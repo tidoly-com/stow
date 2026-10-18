@@ -286,6 +286,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	// the same failure, added again at each start before AssetsWithoutJob left it out: the last one is kept
+	if _, err := db.Exec(`DELETE FROM jobs WHERE state = 'failed' AND EXISTS
+		(SELECT 1 FROM jobs n WHERE n.asset_id = jobs.asset_id AND n.kind = jobs.kind AND n.id > jobs.id)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("schema: %w", err)
+	}
 	return &Store{db}, nil
 }
 
@@ -731,10 +737,11 @@ func (s *Store) Undated(ctx context.Context) ([]Asset, error) {
 	return out, rows.Err()
 }
 
-// AssetsWithoutJob lists the assets that have no job of this kind waiting or running — or, with ever
-// set, that never had one at all.
+// AssetsWithoutJob lists the assets that have no job of this kind waiting, running or given up on — or,
+// with ever set, that never had one at all. One given up on is not tried again: the file stays unreadable,
+// and each start of the program added the same failure once more.
 func (s *Store) AssetsWithoutJob(ctx context.Context, kind string, ever bool) ([]string, error) {
-	states := ` AND j.state IN ('queued', 'running')`
+	states := ` AND j.state IN ('queued', 'running', 'failed')`
 	if ever {
 		states = ``
 	}
