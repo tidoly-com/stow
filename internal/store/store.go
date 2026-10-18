@@ -138,6 +138,14 @@ CREATE TABLE IF NOT EXISTS skipped (     -- files in a read-only folder that the
 	path     TEXT NOT NULL,
 	PRIMARY KEY (location, path)
 );
+CREATE TABLE IF NOT EXISTS copies (      -- files in a read-only folder that are a photo the library has already: looked at once
+	location TEXT NOT NULL,
+	path     TEXT NOT NULL,
+	size     INTEGER NOT NULL,
+	modified TEXT NOT NULL,
+	checksum BLOB NOT NULL,
+	PRIMARY KEY (location, path)
+);
 CREATE TABLE IF NOT EXISTS coupons (  -- pictures the coupon job found to be coupons; once found, never put in the album again
 	asset_id TEXT PRIMARY KEY REFERENCES assets(id),
 	code     TEXT NOT NULL,   -- the barcode's text
@@ -1625,6 +1633,48 @@ func (s *Store) Skipped(ctx context.Context, location string) (map[string]bool, 
 	return out, rows.Err()
 }
 
+// FileCopy is a file of a read-only folder found to be the same photo as one in the library already: its
+// size and time when it was read, and what it held.
+type FileCopy struct {
+	Size     int64
+	Modified string
+	Checksum []byte
+}
+
+// NoteCopy remembers a file found to be a photo the library has already, so that the next look at its
+// folder need not read it through again: every start of the program read every such file, 25 GB on a
+// laptop's disk for two folders that are mostly the same photos (2026-10-19).
+func (s *Store) NoteCopy(ctx context.Context, location, path string, c FileCopy) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO copies (location, path, size, modified, checksum) VALUES (?,?,?,?,?)`,
+		location, path, c.Size, c.Modified, c.Checksum)
+	return err
+}
+
+// Copies lists the files of a folder noted by NoteCopy, by path.
+func (s *Store) Copies(ctx context.Context, location string) (map[string]FileCopy, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT path, size, modified, checksum FROM copies WHERE location = ?`, location)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]FileCopy{}
+	for rows.Next() {
+		var path string
+		var c FileCopy
+		if err := rows.Scan(&path, &c.Size, &c.Modified, &c.Checksum); err != nil {
+			return nil, err
+		}
+		out[path] = c
+	}
+	return out, rows.Err()
+}
+
+// ForgetCopy drops a file noted by NoteCopy: gone from its folder, or read in after all.
+func (s *Store) ForgetCopy(ctx context.Context, location, path string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM copies WHERE location = ? AND path = ?`, location, path)
+	return err
+}
+
 // RemoveLocation forgets a folder that holds no photos; one that holds any stays.
 func (s *Store) RemoveLocation(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM locations WHERE id = ? AND id NOT IN (SELECT location FROM assets)`, id)
@@ -1632,7 +1682,9 @@ func (s *Store) RemoveLocation(ctx context.Context, id string) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		_, err = s.db.ExecContext(ctx, `DELETE FROM skipped WHERE location = ?`, id)
+		if _, err = s.db.ExecContext(ctx, `DELETE FROM skipped WHERE location = ?`, id); err == nil {
+			_, err = s.db.ExecContext(ctx, `DELETE FROM copies WHERE location = ?`, id)
+		}
 	}
 	return err
 }

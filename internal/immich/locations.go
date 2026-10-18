@@ -268,6 +268,10 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 	if err != nil {
 		return err
 	}
+	copies, err := s.store.Copies(ctx, id)
+	if err != nil {
+		return err
+	}
 	// Counting first costs one more walk through the folders, names only — no file is opened — and
 	// lets the page say "3,913 / 14,298" rather than a number that only goes up.
 	if err := mediaFiles(loc.Path, func(string, fs.DirEntry) error { report.Total.Add(1); return ctx.Err() }); err != nil {
@@ -292,6 +296,14 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 				return nil // recorded, and not changed since
 			}
 			s.deleteAsset(ctx, was.OwnerID, was.AssetID, false) // another file under the same name now
+		}
+		if c, ok := copies[rel]; ok && c.Size == info.Size() && c.Modified == modified {
+			// a copy of a photo the library has, not changed since: left out again without reading it, as
+			// long as that photo is still there elsewhere — deleted, this copy is read in in its place
+			if was, err := s.store.AssetByChecksum(ctx, loc.OwnerID, c.Checksum); err == nil && was.Location != id {
+				report.Same.Add(1)
+				return ctx.Err()
+			}
 		}
 		sum, err := checksum(full)
 		if err != nil {
@@ -322,9 +334,17 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 				}
 			}
 			report.Same.Add(1)
+			if err := s.store.NoteCopy(ctx, id, rel, store.FileCopy{Size: info.Size(), Modified: modified, Checksum: sum}); err != nil {
+				return err
+			}
 		case err != nil:
 			return err
 		default:
+			if _, ok := copies[rel]; ok {
+				if err := s.store.ForgetCopy(ctx, id, rel); err != nil {
+					return err
+				}
+			}
 			if report.Added.Add(1)%50 == 1 {
 				s.runner.Wake()
 			}
@@ -333,6 +353,13 @@ func (s *Server) scan(ctx context.Context, id string, report *Scan) error {
 	})
 	if err != nil {
 		return err
+	}
+	for rel := range copies {
+		if !seen[rel] {
+			if err := s.store.ForgetCopy(ctx, id, rel); err != nil {
+				return err
+			}
+		}
 	}
 	for rel, was := range known {
 		if !seen[rel] {
