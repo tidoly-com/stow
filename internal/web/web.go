@@ -1152,7 +1152,7 @@ func (w *Web) adminPage(rw http.ResponseWriter, r *http.Request, user store.User
 	}
 	data["Moved"] = r.URL.Query().Get("moved") // a place was just added and made the one new photos go to
 	if w.Update != nil {
-		data["Newer"], data["Updating"] = w.Update.Newer(), w.Update.State()
+		data["Newer"], data["Updating"], data["ByButton"] = w.Update.Newer(), w.Update.State(), w.Update.ByButton()
 	}
 	data["Away"], data["AwayFolders"] = !lan.From(r), awayFolders
 	data["CouponDays"], data["CouponsOn"], data["Faces"] = w.CouponDays, w.Store.CouponsOn(r.Context()), w.faces(r.Context())
