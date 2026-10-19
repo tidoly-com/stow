@@ -1,11 +1,11 @@
-# Tests on every push to main and every pull request. Releases are made from tags (v0.1.0, …), not from
+# Tests on every push to main or develop and every pull request. Releases are made from tags (v0.1.0, …), not from
 # main: a customer's app sees a new version only when one is tagged and released (internal/update). The
 # release builds join here once their runners are set up — the Mac universal app, Windows (mingw-w64)
 # and Linux (zig) helpers are built on the operator's Mac for now, with scripts/release-*.sh.
 name: test
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 jobs:
   test:

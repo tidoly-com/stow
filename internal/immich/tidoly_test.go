@@ -403,3 +403,39 @@ func TestTheTunnelServerAsHomeWritesIt(t *testing.T) {
 		}
 	}
 }
+
+// In the line for a tunnel, home tells the place and when the next place opens; out of it, it leaves the
+// field out.
+func TestTheTunnelLineIsAskedOfHome(t *testing.T) {
+	var queued atomic.Bool
+	queued.Store(true)
+	home := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/stow/tunnel" || r.Header.Get("Authorization") != "Bearer tdly_stow_secret" {
+			w.WriteHeader(401)
+			return
+		}
+		answer := map[string]any{"frps": map[string]any{"serverAddr": "frps.stow.test", "serverPort": 7000}}
+		if queued.Load() {
+			answer["waiting"] = map[string]any{"position": 4, "opensAt": "2026-10-26T00:00:00.000Z"}
+		}
+		json.NewEncoder(w).Encode(answer)
+	}))
+	defer home.Close()
+	e := start(t, t.TempDir(), newKey(t))
+	e.api.cfg.HomeURL = home.URL
+	ctx := context.Background()
+	if _, _, ok := e.api.TunnelWaiting(ctx); ok {
+		t.Error("not connected to tidoly, yet in a line")
+	}
+	if err := e.api.setLink(ctx, Link{Slug: "mom", Host: "mom.stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+		t.Fatal(err)
+	}
+	position, opens, ok := e.api.TunnelWaiting(ctx)
+	if !ok || position != 4 || !opens.Equal(time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("in the line: %d %v %v", position, opens, ok)
+	}
+	queued.Store(false)
+	if _, _, ok := e.api.TunnelWaiting(ctx); ok {
+		t.Error("out of the line, yet in it")
+	}
+}

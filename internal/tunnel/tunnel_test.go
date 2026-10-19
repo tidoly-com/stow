@@ -73,6 +73,14 @@ func startFrps(t *testing.T) *frps {
 		f.keys = append(f.keys, key)
 		f.mu.Unlock()
 		ok := key == "tdly_stow_mom" && (req.Op == "Login" || req.Content.Subdomain == "mom")
+		if key == "tdly_stow_queued" { // the week's new tunnels taken: logged in, the name waits
+			if req.Op == "Login" {
+				json.NewEncoder(w).Encode(map[string]any{"reject": false, "unchange": true})
+			} else {
+				json.NewEncoder(w).Encode(map[string]any{"reject": true, "reject_reason": "waiting", "unchange": true})
+			}
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"reject": !ok, "reject_reason": "not allowed", "unchange": true})
 	}))
 	t.Cleanup(plugin.Close)
@@ -214,5 +222,34 @@ func TestTheKeyGoesOnlyToTheRealServer(t *testing.T) {
 	}
 	if keys := f.shown(); len(keys) != 0 {
 		t.Errorf("the key reached a server that could not prove itself: %v", keys)
+	}
+}
+
+// A server in tidoly's line for a tunnel is not told its key is refused: it is told its place, and when
+// the next place opens.
+func TestAServerInTheLineIsToldItsPlace(t *testing.T) {
+	f := startFrps(t)
+	opens := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	asked := 0
+	var mu sync.Mutex
+	tun := &Tunnel{Server: f.addr, LocalPort: local(t), Dir: t.TempDir(), Roots: f.ca,
+		Waiting: func(context.Context) (int, time.Time, bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked++
+			return 3, opens, true
+		}}
+	defer tun.Close()
+	tun.Set("mom", "tdly_stow_queued", "", false)
+	waitFor(t, "the place in the line", func() bool { return strings.Contains(tun.State(), "대기 3번째") })
+	state := tun.State()
+	if strings.Contains(state, "열쇠") || !strings.Contains(state, opens.Local().Format("1월 2일 15:04")) || !strings.Contains(state, "저절로 연결") {
+		t.Errorf("state: %q", state)
+	}
+	time.Sleep(5 * time.Second) // frpc tries again every 30 s: the line is asked no more often than that
+	mu.Lock()
+	defer mu.Unlock()
+	if asked != 1 {
+		t.Errorf("the line was asked %d times in a few seconds", asked)
 	}
 }

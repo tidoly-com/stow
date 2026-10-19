@@ -119,7 +119,7 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 	if err := api.LoadLocations(ctx); err != nil {
 		t.Fatal(err)
 	}
-	pages := &web.Web{Store: st, User: api.SessionUser, Address: "http://light.test", FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, Changed: api.Changed, Events: api.WebEvents,
+	pages := &web.Web{Store: st, User: api.SessionUser, Address: "http://light.test", FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, ScreenshotsOn: api.ScreenshotsOn, SetScreenshots: api.SetScreenshots, Changed: api.Changed, Events: api.WebEvents,
 		Dir: dir, ResetFile: filepath.Join(dir, "owner-reset"), Contact: testHome + "/contact", Version: "test-1",
 		VPN: &vpn.Manager{VPN: &vpn.VPN{Port: freeUDPPort(t), Handler: api}, Settings: st}, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
@@ -134,14 +134,16 @@ func start(t *testing.T, dir string, key ed25519.PrivateKey) *env {
 			if scan == nil {
 				return web.FolderState{}, false
 			}
-			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load()}, true
+			return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(),
+				Total: scan.Total.Load(), Counted: scan.Counted.Load()}, true
 		},
 		Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: TrashDays,
-		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashLinkPassword}}
+		Links: web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: HashPassword}}
 	api.Pages(pages.Handler(api.WebLoginStart, api.WebLogout))
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)
 	runner.Handle("thumbnail", api.MakeThumbnail)
+	runner.Handle(store.AskedKind, api.MakeFull)
 	if withFaces {
 		runner.Handle("face", api.FindFaces)
 		if _, err := api.QueueMissingFaces(ctx); err != nil {
@@ -959,7 +961,7 @@ func TestTheSameFaceInTwoPhotosBecomesAPerson(t *testing.T) {
 	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); res.StatusCode != 200 || err != nil || cfg.Width != 250 || cfg.Height != 250 {
 		t.Errorf("her picture: status %d, %v, %dx%d", res.StatusCode, err, cfg.Width, cfg.Height)
 	}
-	// two look-alikes in one photo are still two people: only one of them may join alice
+	// the same face twice in one photo — a mirror, a collage — is kept once, and joins alice
 	photo("alice with alice in a mirror.jpg", 6)
 	e.settle()
 	joined, alone := 0, 0
@@ -974,21 +976,21 @@ func TestTheSameFaceInTwoPhotosBecomesAPerson(t *testing.T) {
 			}
 		}
 	}
-	if joined != 3 { // beach, with carol, and one of the two in the mirror
-		t.Errorf("faces that are alice: %d, want 3", joined)
+	if joined != 3 || alone != 2 { // beach, with carol, and the larger of the two in the mirror; the other is left out — alone: bob and carol
+		t.Errorf("faces that are alice: %d, nobody's: %d, want 3 and 2", joined, alone)
 	}
 
 	// a face too small to tell apart is not kept at all, however often it shows up
 	photo("bob far away.jpg", 8)
 	photo("bob far away again.jpg", 10)
 	e.settle()
-	if lone, _ := e.store.LoneFaces(context.Background(), e.userID("owner@example.com")); lone != 3 { // bob close up, carol, alice in the mirror
-		t.Errorf("faces that are nobody yet: %d, want 3", lone)
+	if lone, _ := e.store.LoneFaces(context.Background(), e.userID("owner@example.com")); lone != 2 { // bob close up, carol
+		t.Errorf("faces that are nobody yet: %d, want 2", lone)
 	}
 
 	// putting alice away: the app is told she is hidden, the web list drops her, and a new photo of her stays away
 	browser := e.browserLogin("owner@example.com", "owner")
-	if _, page := e.browse("/people", browser); !strings.Contains(page, alice["id"].(string)) || !strings.Contains(page, "한 번만 나온 얼굴 3개") {
+	if _, page := e.browse("/people", browser); !strings.Contains(page, alice["id"].(string)) || !strings.Contains(page, "한 번만 나온 얼굴 2개") {
 		t.Errorf("people page before hiding: %s", page)
 	}
 	hide := func(id string, form url.Values, cookie *http.Cookie) int {
@@ -2196,6 +2198,35 @@ func TestAFolderIsReadWhereItLies(t *testing.T) {
 		t.Errorf("after deleting a.jpg from the library and looking again: %v", got)
 	}
 
+	// the copy of a photo the library has is read once: looked at again, it is known by its size and time
+	// alone — made unreadable, it still counts as the same photo
+	if copies, _ := e.store.Copies(ctx, id[1]); len(copies) != 1 || copies["copy-of-the-phone-photo.jpg"].Size == 0 {
+		t.Errorf("copies noted: %v", copies)
+	}
+	unreadable := filepath.Join(folder, "copy-of-the-phone-photo.jpg")
+	os.Chmod(unreadable, 0)
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	os.Chmod(unreadable, 0o644)
+	if _, page := e.browse("/admin", owner); !strings.Contains(page, "이미 있던 사진 1") {
+		t.Error("looked at again, the copy was read through rather than known by its size and time")
+	}
+	// so is a photo twice in the folder itself, while the first stays where it is
+	put("trip/again/b.jpg", mediatest.JPEG(mediatest.Camera.Bytes(), 420, 300))
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	again := filepath.Join(folder, "trip", "again", "b.jpg")
+	os.Chmod(again, 0)
+	os.Chmod(unreadable, 0)
+	post(owner, "/admin/import/scan", url.Values{"id": {id[1]}})
+	looked()
+	os.Chmod(again, 0o644)
+	os.Chmod(unreadable, 0o644)
+	if _, page := e.browse("/admin", owner); !strings.Contains(page, "이미 있던 사진 2") {
+		t.Error("looked at again, the second copy in the folder was read through rather than known by its size and time")
+	}
+	os.RemoveAll(filepath.Join(folder, "trip", "again"))
+
 	// the folder changes: a new file comes in, a file that is gone leaves
 	put("c.jpg", mediatest.JPEG(mediatest.Camera.Bytes(), 440, 300))
 	os.Remove(filepath.Join(folder, "trip", "b.jpg"))
@@ -2807,8 +2838,7 @@ func TestCouponsGatherInAnAlbumOnceSwitchedOn(t *testing.T) {
 		if m == nil {
 			return "", ""
 		}
-		_, inside := e.browse("/albums/"+m[1], owner) // the coupon album is drawn whole, by last day
-		return m[1], inside
+		return m[1], e.albumCells(m[1], owner)
 	}
 	if id, _ := album(); id != "" {
 		t.Fatal("an album was made while coupons were off")
@@ -2844,13 +2874,27 @@ func TestCouponsGatherInAnAlbumOnceSwitchedOn(t *testing.T) {
 	second := up("coupon-2.jpg", barcodeJPEG(t, "222222222222"))
 	old := up("old-coupon.jpg", barcodeJPEG(t, "111111111111"))
 	e.settle()
-	// the coupon album: the ones still good by their last day, the past ones folded below
+	// the coupon album is drawn as any album, by the day each picture was taken — its last day is not
+	// read surely enough to sort by
 	_, page := e.browse("/albums/"+id, owner)
-	good, unknown, gone := strings.Index(page, second), strings.Index(page, member), strings.Index(page, old)
-	if good < 0 || unknown < 0 || gone < 0 || good > unknown || unknown > gone || !strings.Contains(page, "2099년 12월 31일까지") || !strings.Contains(page, "유효기간 모름") ||
-		!strings.Contains(page, "지난 쿠폰 1장") || !strings.Contains(page, "2020년 1월 3일에 끝남") {
-		t.Errorf("coupon album page: %s", page)
+	if !strings.Contains(page, "<section data-month=") || strings.Contains(page, "지난 쿠폰") {
+		t.Errorf("coupon album page, not by day: %s", page)
 	}
+	if _, cells := album(); !strings.Contains(cells, second) || !strings.Contains(cells, old) || !strings.Contains(cells, member) {
+		t.Errorf("coupon album: %s", cells)
+	}
+}
+
+// albumCells is what an album page shows, month by month as the page fetches them.
+func (e *env) albumCells(id string, session *http.Cookie) string {
+	e.t.Helper()
+	_, page := e.browse("/albums/"+id, session)
+	var all strings.Builder
+	for _, m := range regexp.MustCompile(`<section data-month="([0-9-]+)"`).FindAllStringSubmatch(page, -1) {
+		_, cells := e.browse("/web/month/"+m[1]+"?album="+url.QueryEscape(id), session)
+		all.WriteString(cells)
+	}
+	return all.String()
 }
 
 // Without the coupon helper — Windows, Linux — a picture with a barcode still goes to the coupon album,
@@ -2871,8 +2915,8 @@ func TestCouponsGatherWithoutTheHelper(t *testing.T) {
 	if m == nil {
 		t.Fatalf("no coupon album: %s", page)
 	}
-	_, inside := e.browse("/albums/"+m[1], owner)
-	if !strings.Contains(inside, a["id"].(string)) || strings.Contains(inside, b["id"].(string)) || !strings.Contains(inside, "유효기간 모름") {
+	inside := e.albumCells(m[1], owner)
+	if !strings.Contains(inside, a["id"].(string)) || strings.Contains(inside, b["id"].(string)) {
 		t.Errorf("coupon album without the helper: %s", inside)
 	}
 }
@@ -3053,7 +3097,7 @@ func TestTheHelpHasTheGuidesThePagesPointTo(t *testing.T) {
 	}
 	reset := "관리자 비밀번호 변경" // from the app's menu; Linux has no menu
 	if runtime.GOOS == "linux" {
-		reset = "tidoly-light -reset-owner"
+		reset = "sudo tidoly-stow password"
 	}
 	for _, want := range []string{`<h3 id="vpn">`, `href="#vpn"`, `id="password"`, reset, "Login with tidoly", "먼저 등록을 해제하세요", `id="outside"`, `href="/start/screen"`,
 		`href="` + testHome + `/contact" target="_blank"`, `data-copy="tidoly stow test-1 · `} {

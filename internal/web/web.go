@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -86,14 +87,17 @@ type Web struct {
 	SetFaces     func(ctx context.Context, on bool) error     // group faces into people from now on, or stop
 	CouponDays   bool                                         // started with the coupon helper: coupons have their last day
 	SetCoupons   func(ctx context.Context, on bool) error     // look for coupons from now on, or stop
-	Changed      func(userID string)                          // tells that person's devices to sync
-	Events       func(userID string) (<-chan string, func())  // that person's changes, as lines of JSON, for open pages
-	Trash        func(ctx context.Context, userID string, ids []string) error
-	Restore      func(ctx context.Context, userID string, ids []string) (int, error)
-	Empty        func(ctx context.Context, userID string) (int, error)
-	Days         int       // how long the trash keeps a photo
-	Links        LinkFuncs // shared links (#13), while the tunnel is on
-	mux          *http.ServeMux
+	// screenshots gathered into an album of their own, on unless switched off
+	ScreenshotsOn  func(ctx context.Context) bool
+	SetScreenshots func(ctx context.Context, on bool) error
+	Changed        func(userID string)                         // tells that person's devices to sync
+	Events         func(userID string) (<-chan string, func()) // that person's changes, as lines of JSON, for open pages
+	Trash          func(ctx context.Context, userID string, ids []string) error
+	Restore        func(ctx context.Context, userID string, ids []string) (int, error)
+	Empty          func(ctx context.Context, userID string) (int, error)
+	Days           int       // how long the trash keeps a photo
+	Links          LinkFuncs // shared links (#13), while the tunnel is on
+	mux            *http.ServeMux
 }
 
 const trashLimit = 2000 // photos shown in the trash
@@ -122,6 +126,8 @@ type Outside struct {
 type FolderState struct {
 	Running                 bool
 	Seen, Added, Same, Gone int64
+	Total                   int64 // photos and videos in the folder; still going up until Counted
+	Counted                 bool
 	Failure                 string
 }
 
@@ -239,6 +245,31 @@ func bytesText(n int64) string {
 	return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
 }
 
+// countText writes a count with its thousands apart: 14,298.
+func countText(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0 && s[i-1] != '-'; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+// progressText is how far a count of done things is in all of them: "3,913 / 14,298장 (27%)".
+func progressText(done, total int64) string {
+	if total <= 0 {
+		return countText(done) + "장"
+	}
+	return fmt.Sprintf("%s / %s장 (%d%%)", countText(done), countText(total), percent(done, total))
+}
+
+// percent rounds down, so 100 means all of them, never all but a few.
+func percent(done, total int64) int64 {
+	if total <= 0 {
+		return 0
+	}
+	return min(done*100/total, 100)
+}
+
 // frame is what every page needs around its own content: who is looking and how full the disk is.
 func (w *Web) frame(ctx context.Context, user store.User, title, tab string) map[string]any {
 	me := user.Name
@@ -335,6 +366,7 @@ func (w *Web) Handler(loginStart, logout http.HandlerFunc) http.Handler {
 	m.HandleFunc("POST /admin/import/remove", w.page(w.adminImportAct))
 	m.HandleFunc("POST /admin/import/pause", w.page(w.adminImportAct))
 	m.HandleFunc("POST /admin/coupons", w.page(w.adminCoupons))
+	m.HandleFunc("POST /admin/screenshots", w.page(w.adminScreenshots))
 	m.HandleFunc("POST /admin/faces", w.page(w.adminFaces))
 	m.HandleFunc("GET /admin/tidoly/connect", w.startConnect)
 	m.HandleFunc("GET /admin/tidoly/back", w.finishConnect)
@@ -695,72 +727,7 @@ func (w *Web) album(rw http.ResponseWriter, r *http.Request, user store.User) {
 	}
 	data := w.frame(r.Context(), user, b.Name, "albums")
 	data["Album"], data["Bar"], data["Upload"] = b.ID, "album", true // photos uploaded here join the album
-	if b.Auto == "coupons" {
-		w.coupons(rw, r, data, user, b.ID)
-		return
-	}
 	w.narrowed(rw, r, data, user, store.Narrow{Album: b.ID}, "album="+url.QueryEscape(b.ID))
-}
-
-// coupons is the coupon album: the ones that can still be used first, the nearest last day first, grouped
-// by that day; then the ones whose day is not known; under them, folded, the ones whose day is past, the
-// latest first.
-func (w *Web) coupons(rw http.ResponseWriter, r *http.Request, data map[string]any, user store.User, albumID string) {
-	list, until, err := w.Store.AlbumCoupons(r.Context(), user.ID, albumID)
-	if err != nil {
-		w.fail(rw, err)
-		return
-	}
-	today := time.Now().Format(time.DateOnly)
-	day0, _ := time.Parse(time.DateOnly, today)
-	rank := func(day string) int { // still good, not known, past
-		switch {
-		case day >= today:
-			return 0
-		case day == "":
-			return 1
-		}
-		return 2
-	}
-	sort.SliceStable(list, func(i, j int) bool {
-		a, b := until[list[i].ID], until[list[j].ID]
-		if rank(a) != rank(b) {
-			return rank(a) < rank(b)
-		}
-		if a >= today {
-			return a < b
-		}
-		return a > b
-	})
-	all := cells(list, user.ID, nil)
-	var valid, past []day
-	pastCount := 0
-	for i, a := range list {
-		key := until[a.ID]
-		label := "유효기간 모름"
-		if at, err := time.Parse(time.DateOnly, key); err == nil {
-			left := int(at.Sub(day0).Hours() / 24)
-			switch {
-			case key < today:
-				label = at.Format("2006년 1월 2일") + "에 끝남"
-			case key == today:
-				label = "오늘까지"
-			default:
-				label = fmt.Sprintf("%s까지 · %d일 남음", at.Format("2006년 1월 2일"), left)
-			}
-		}
-		group := &valid
-		if key != "" && key < today {
-			group = &past
-			pastCount++
-		}
-		if n := len(*group); n == 0 || (*group)[n-1].Label != label {
-			*group = append(*group, day{Label: label})
-		}
-		(*group)[len(*group)-1].Cells = append((*group)[len(*group)-1].Cells, all[i])
-	}
-	data["Valid"], data["Past"], data["PastCount"], data["Total"] = valid, past, pastCount, len(list)
-	w.render(rw, "coupons", data)
 }
 
 func (w *Web) person(rw http.ResponseWriter, r *http.Request, user store.User) {
@@ -854,12 +821,15 @@ func (w *Web) photo(rw http.ResponseWriter, r *http.Request, user store.User) {
 	if !mine {
 		place = "" // the places are of one's own photos; there is nothing of this one to go to
 	}
-	// zoomed in, the page swaps the preview for the file itself — when it is of a kind browsers show
-	full := false
+	// zoomed in, the page swaps the preview for the file itself — when it is of a kind browsers show — or,
+	// for HEIC, for a full-size JPEG the server makes the first time it is asked (stow issue #3)
+	full := ""
 	if asset.Type != "VIDEO" && asset.DeletedAt == "" {
 		switch strings.ToLower(path.Ext(asset.OriginalName)) {
 		case ".jpg", ".jpeg", ".png", ".webp", ".gif":
-			full = true
+			full = "/api/assets/" + asset.ID + "/original"
+		case ".heic", ".heif":
+			full = "/api/assets/" + asset.ID + "/full"
 		}
 	}
 	people, _ := w.Store.PeopleIn(ctx, user.ID, asset.ID) // none for someone else's photo
@@ -956,6 +926,23 @@ func (w *Web) trashAct(rw http.ResponseWriter, r *http.Request, user store.User)
 
 var jobNames = map[string]string{"metadata": "사진 정보 읽기", "thumbnail": "작은 그림 만들기", "place": "장소 이름 붙이기", "face": "얼굴 찾기", "coupon": "쿠폰 찾기"}
 
+// jobsLeft is what is still to be done in the background, and the work going on now: "얼굴 찾기 · 장소 이름 붙이기".
+func jobsLeft(reports []store.JobReport) (left int, now string) {
+	var doing []string
+	for _, kind := range []string{"metadata", "thumbnail", "place", "face", "coupon"} {
+		for _, rep := range reports {
+			if rep.Kind != kind || rep.State != "queued" && rep.State != "running" {
+				continue
+			}
+			left += rep.Count
+			if rep.State == "running" {
+				doing = append(doing, jobNames[kind])
+			}
+		}
+	}
+	return left, strings.Join(doing, " · ")
+}
+
 func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 	ctx := r.Context()
 	files, bytes, err := w.Store.Totals(ctx, user.ID)
@@ -969,6 +956,8 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 	type row struct {
 		Name                          string
 		Queued, Running, Done, Failed int
+		Progress                      string // "12,481 / 14,760장 (84%)": done or given up, in all of them
+		Max, Value                    int
 	}
 	var jobs []row
 	for _, kind := range []string{"metadata", "thumbnail", "place", "face", "coupon"} {
@@ -988,6 +977,8 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 				line.Failed = rep.Count
 			}
 		}
+		line.Max, line.Value = line.Queued+line.Running+line.Done+line.Failed, line.Done+line.Failed
+		line.Progress = progressText(int64(line.Value), int64(line.Max))
 		if kind != "face" || w.faces(r.Context()) == "on" {
 			jobs = append(jobs, line)
 		}
@@ -996,7 +987,9 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request, user store.User) {
 		failures[i].Kind = jobNames[failures[i].Kind]
 	}
 	data := w.frame(r.Context(), user, "상태", "status")
+	left, now := jobsLeft(reports)
 	for k, v := range map[string]any{"Addr": w.addresses(r.Context()), "Invite": w.invite(r.Context(), ""), "Files": files, "Size": bytesText(bytes), "Jobs": jobs, "Failures": failures,
+		"Left": left, "LeftText": countText(int64(left)), "Now": now,
 		"LocationOff": camera >= 10 && located == 0, "Camera": camera} {
 		data[k] = v
 	}
@@ -1061,8 +1054,10 @@ func (w *Web) placesFor(ctx context.Context, user store.User) (places, folders [
 		if state, ok := w.FolderState(l.ID); ok && !l.Paused {
 			p.Running = state.Running
 			switch {
+			case state.Running && !state.Counted:
+				p.State = fmt.Sprintf("파일 세는 중 — %s개", countText(state.Total))
 			case state.Running:
-				p.State = fmt.Sprintf("훑는 중 — %d개 봄", state.Seen)
+				p.State = "훑는 중 — " + progressText(state.Seen, state.Total)
 			case state.Failure != "":
 				p.State = "훑지 못했습니다. 디스크가 연결되어 있는지 확인해 주세요"
 			default:
@@ -1113,11 +1108,17 @@ func (w *Web) adminPage(rw http.ResponseWriter, r *http.Request, user store.User
 		data["Arrivals"] = strings.Join(names, ", ")
 	}
 	data["Moved"] = r.URL.Query().Get("moved") // a place was just added and made the one new photos go to
+	if reports, err := w.Store.JobReports(ctx); err == nil {
+		if left, now := jobsLeft(reports); left > 0 {
+			data["Left"], data["Now"] = countText(int64(left)), now
+		}
+	}
 	if w.Update != nil {
-		data["Newer"], data["Updating"] = w.Update.Newer(), w.Update.State()
+		data["Newer"], data["Updating"], data["ByButton"] = w.Update.Newer(), w.Update.State(), w.Update.ByButton()
 	}
 	data["Away"], data["AwayFolders"] = !lan.From(r), awayFolders
 	data["CouponDays"], data["CouponsOn"], data["Faces"] = w.CouponDays, w.Store.CouponsOn(r.Context()), w.faces(r.Context())
+	data["ScreenshotsOn"] = w.ScreenshotsOn != nil && w.ScreenshotsOn(r.Context())
 	usable := 0
 	for _, p := range places {
 		if !p.Missing {
@@ -1536,6 +1537,19 @@ func (w *Web) adminCoupons(rw http.ResponseWriter, r *http.Request, user store.U
 	http.Redirect(rw, r, back(r), http.StatusSeeOther)
 }
 
+// adminScreenshots switches gathering screenshots into an album of their own on or off.
+func (w *Web) adminScreenshots(rw http.ResponseWriter, r *http.Request, user store.User) {
+	if !user.IsAdmin || w.SetScreenshots == nil {
+		http.NotFound(rw, r)
+		return
+	}
+	if err := w.SetScreenshots(r.Context(), r.FormValue("on") != ""); err != nil {
+		w.fail(rw, err)
+		return
+	}
+	http.Redirect(rw, r, back(r), http.StatusSeeOther)
+}
+
 // ── accounts the server keeps itself ────────────────────────────────────────────────────────────────────────
 
 // localLogin takes the address and password from the login page.
@@ -1630,7 +1644,8 @@ func (w *Web) startAuto(rw http.ResponseWriter, r *http.Request, user store.User
 		return
 	}
 	w.render(rw, "start-auto", map[string]any{"Title": "자동 정리", "Steps": stepsAt(6),
-		"Faces": w.faces(r.Context()), "CouponsOn": w.Store.CouponsOn(r.Context()), "CouponDays": w.CouponDays})
+		"Faces": w.faces(r.Context()), "CouponsOn": w.Store.CouponsOn(r.Context()), "CouponDays": w.CouponDays,
+		"ScreenshotsOn": w.ScreenshotsOn != nil && w.ScreenshotsOn(r.Context())})
 }
 
 // back is where a switch or a folder chosen on a first step returns to: that step; from the admin page, the

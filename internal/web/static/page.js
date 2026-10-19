@@ -99,7 +99,7 @@
     area.value = text;
     area.style.position = "fixed";
     area.style.opacity = "0";
-    document.body.append(area);
+    (document.querySelector("dialog[open]") || document.body).append(area); // outside an open dialog the page is inert
     area.select();
     const ok = document.execCommand("copy");
     area.remove();

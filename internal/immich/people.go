@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +21,85 @@ import (
 // Smaller ones are passers-by in the background and toys in someone's hand, and they are too coarse to
 // tell apart: on the operator's first photos every face under 50 pixels was one or the other.
 const minFaceSide = 60
+
+// repeatLikeness is how alike two faces in one photo must be to be one face put there more than once — a
+// collage of the same face, a sticker sheet. On 654 photos with faces, pairs of faces within one photo were
+// below 0.6 or well above it: 311 pairs below (different people, and a few alike), 5 between 0.6 and 0.7,
+// 204 at 0.7 and over — all in 9 collages (2026-10-18). Treated as people, a collage's repeats became as
+// many new persons, since two faces in one photo are kept two people.
+const repeatLikeness = 0.6
+
+// withoutRepeats keeps, of faces in one photo that are the same face repeated, the largest.
+func withoutRepeats(found []store.Face) []store.Face {
+	sorted := append([]store.Face(nil), found...)
+	sort.SliceStable(sorted, func(i, j int) bool { return area(sorted[i]) > area(sorted[j]) })
+	var kept []store.Face
+	for _, f := range sorted {
+		repeat := false
+		for _, k := range kept {
+			if faces.Likeness(f.Embedding, k.Embedding) >= repeatLikeness {
+				repeat = true
+				break
+			}
+		}
+		if !repeat {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
+func area(f store.Face) int { return (f.X2 - f.X1) * (f.Y2 - f.Y1) }
+
+// LookAgainAtRepeats finds the photos read before repeats were left out that hold the same face more than
+// once, forgets their faces — a person left with none goes — and looks at them again. It is done at start;
+// once they are looked at again there are none.
+func (s *Server) LookAgainAtRepeats(ctx context.Context) (photos int, err error) {
+	users, err := s.store.Users(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, u := range users {
+		s.faceMu.Lock()
+		all, err := s.store.FaceDescriptions(ctx, u.ID)
+		s.faceMu.Unlock()
+		if err != nil {
+			return photos, err
+		}
+		byPhoto := map[string][]store.Face{}
+		for _, f := range all {
+			byPhoto[f.AssetID] = append(byPhoto[f.AssetID], f)
+		}
+		for assetID, list := range byPhoto {
+			if len(withoutRepeats(list)) == len(list) {
+				continue
+			}
+			s.faceMu.Lock()
+			changed, err := s.store.ForgetFaces(ctx, u.ID, assetID)
+			s.faceMu.Unlock()
+			if err != nil {
+				return photos, err
+			}
+			for personID, faceID := range changed {
+				s.cfg.Thumbs.Remove(personID)
+				if faceID != "" {
+					if err := s.makePersonPicture(ctx, personID, faceID); err != nil {
+						log.Printf("faces: new picture for a person: %v", err)
+					}
+				}
+			}
+			if err := s.store.AddJob(ctx, assetID, "face"); err != nil {
+				return photos, err
+			}
+			photos++
+		}
+		if photos > 0 {
+			s.Changed(u.ID)
+			s.runner.Wake()
+		}
+	}
+	return photos, nil
+}
 
 // FindFaces is the "face" job: ask the helper for the faces in a photo, and put each together with the
 // earlier face it most resembles, if it resembles one enough (stow issue #10). It runs on the upright
@@ -65,6 +145,7 @@ func (s *Server) FindFaces(ctx context.Context, assetID string) error {
 			fresh = append(fresh, face)
 		}
 	}
+	fresh = withoutRepeats(fresh)
 	takenPeople, takenFaces := map[string]bool{}, map[string]bool{}
 	for len(fresh) > 0 {
 		pick, like, best := 0, "", s.cfg.FaceThreshold

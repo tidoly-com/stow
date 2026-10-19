@@ -62,8 +62,22 @@ func main() {
 	name := flag.String("name", "", "what this server is called on the other devices in the house (default: this computer's name)")
 	inspect := flag.String("inspect", "", "print what this program reads from one photo or video, then exit")
 	updateURL := flag.String("update-url", "https://github.com/tidoly-com/stow/releases/latest/download", "where releases are downloaded from: latest.json, the app, SHA256SUMS")
+	ownerPassword := flag.Bool("owner-password", false, "ask on this terminal for a new password for the server's owner, set it, and exit — for a server with no browser of its own (\"sudo tidoly-stow password\")")
 	resetOwner := flag.Bool("reset-owner", false, "print a link, good once for 10 minutes and only in a browser on this PC, that sets the owner's password again; then exit")
 	flag.Parse()
+	if flag.Arg(0) == "password" { // sudo tidoly-stow password
+		*ownerPassword = true
+	}
+	if *ownerPassword {
+		if *configFile == "" && *dataDir == "data" {
+			*configFile = serviceConfig()
+		}
+		if err := setOwnerPassword(*configFile, *dataDir); err != nil {
+			fmt.Fprintln(os.Stderr, "tidoly stow:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *inspect != "" {
 		info, err := media.Read(*inspect, time.Local)
 		if err != nil {
@@ -177,15 +191,16 @@ func main() {
 	defer vpnSet.VPN.Close()
 	keeper.Home = api.CallHome
 	keeper.Ready = func() { out.set(api.Link()) } // the tunnel takes https now
+	tun.Waiting = api.TunnelWaiting               // the week's new tunnels taken: its place in tidoly's line
 
 	if err := api.LoadLocations(ctx); err != nil {
 		log.Fatalf("storage: %v", err)
 	}
-	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, Changed: api.Changed, Events: api.WebEvents,
+	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, ScreenshotsOn: api.ScreenshotsOn, SetScreenshots: api.SetScreenshots, Changed: api.Changed, Events: api.WebEvents,
 		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
 		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
 		TidolyHere: api.TidolyHere,
-		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashLinkPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
+		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
 		SetAutoAdd: api.SetAutoAdd, Block: api.Block, Arrivals: api.Arrivals, SeenArrivals: api.SeenArrivals,
 		Contact:   *homeURL + "/contact",
 		AddFolder: api.AddFolder, PauseFolder: api.PauseFolder, ScanFolder: api.ScanFolder, RemoveFolder: api.RemoveFolder, FolderState: folderState(api), Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: immich.TrashDays}
@@ -193,6 +208,7 @@ func main() {
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)
 	runner.Handle("thumbnail", api.MakeThumbnail)
+	runner.Handle(store.AskedKind, api.MakeFull)
 	if helper != nil || helperLater != nil {
 		runner.Handle("face", api.FindFaces)
 	}
@@ -218,10 +234,24 @@ func main() {
 	} else if n > 0 {
 		log.Printf("coupons: %d pictures not looked at yet, queued", n)
 	}
-	if n, err := api.QueueUndatedEdits(ctx); err != nil {
-		log.Printf("edited copies: %v", err)
+	go func() { // photos read before a face repeated in one photo was taken as one
+		if n, err := api.LookAgainAtRepeats(ctx); err != nil {
+			log.Printf("faces: %v", err)
+		} else if n > 0 {
+			log.Printf("faces: %d photos with the same face more than once, looked at again", n)
+		}
+	}()
+	go func() { // pictures read before screenshots were gathered, or while it was switched off
+		if n, err := api.FileScreenshots(ctx); err != nil {
+			log.Printf("screenshots: %v", err)
+		} else if n > 0 {
+			log.Printf("screenshots: %d put in the album", n)
+		}
+	}()
+	if n, err := api.QueueUndated(ctx); err != nil {
+		log.Printf("undated photos: %v", err)
 	} else if n > 0 {
-		log.Printf("edited copies: %d read without a date, read again", n)
+		log.Printf("undated photos: %d whose day can now be told, read again", n)
 	}
 	if n, err := api.QueueMissingThumbnails(ctx); err != nil {
 		log.Printf("thumbnails: %v", err)
@@ -567,6 +597,7 @@ func folderState(api *immich.Server) func(string) (web.FolderState, bool) {
 			return web.FolderState{}, false
 		}
 		failure, _ := scan.Failure.Load().(string)
-		return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(), Failure: failure}, true
+		return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(),
+			Total: scan.Total.Load(), Counted: scan.Counted.Load(), Failure: failure}, true
 	}
 }

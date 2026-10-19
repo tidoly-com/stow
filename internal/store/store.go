@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, id);
 CREATE INDEX IF NOT EXISTS jobs_asset ON jobs(asset_id, kind); -- finding the photos a kind of job was never done for, at every start
+CREATE INDEX IF NOT EXISTS jobs_kind ON jobs(kind, state, id); -- an asked-for job is found without going through the whole queue
 CREATE TABLE IF NOT EXISTS sync_acks (
 	token_hash BLOB NOT NULL,
 	type       TEXT NOT NULL,
@@ -136,10 +138,21 @@ CREATE TABLE IF NOT EXISTS skipped (     -- files in a read-only folder that the
 	path     TEXT NOT NULL,
 	PRIMARY KEY (location, path)
 );
+CREATE TABLE IF NOT EXISTS copies (      -- files in a read-only folder that are a photo the library has already: looked at once
+	location TEXT NOT NULL,
+	path     TEXT NOT NULL,
+	size     INTEGER NOT NULL,
+	modified TEXT NOT NULL,
+	checksum BLOB NOT NULL,
+	PRIMARY KEY (location, path)
+);
 CREATE TABLE IF NOT EXISTS coupons (  -- pictures the coupon job found to be coupons; once found, never put in the album again
 	asset_id TEXT PRIMARY KEY REFERENCES assets(id),
 	code     TEXT NOT NULL,   -- the barcode's text
 	expires  TEXT NOT NULL    -- the last day it can be used, 2026-12-31
+);
+CREATE TABLE IF NOT EXISTS screenshots (  -- pictures put in the screenshot album; once put, never put in again
+	asset_id TEXT PRIMARY KEY REFERENCES assets(id)
 );
 CREATE TABLE IF NOT EXISTS memories (  -- "N년 전 이달": for each person, one a day, of this month's photos from one earlier year
 	id         TEXT PRIMARY KEY,
@@ -256,8 +269,11 @@ type Job struct {
 }
 
 func Open(path string) (*Store, error) {
-	// _txlock=immediate: a transaction that will write takes the write lock up front instead of failing halfway
-	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)")
+	// _txlock=immediate: a transaction that will write takes the write lock up front instead of failing halfway.
+	// busy_timeout of a minute: on a hard disk that is also taking a large copy, one write can take seconds to
+	// reach the disk, and with ten seconds the others gave up — "database is locked" 198 times in an hour on a
+	// laptop (2026-10-18).
+	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(60000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +287,23 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("schema: %w", err)
 		}
 	}
-	// an index on a column that was added above cannot be made before it
+	// an index on a column that was added above cannot be made before it. It holds only the moving halves of
+	// live photos; a query uses it only when it says live_of != '' itself — without that, finding a photo's
+	// moving half read every photo, for every photo listed (a month of 11,000 took 50 s, 2026-10-18)
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assets_live ON assets(live_of) WHERE live_of != ''`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("schema: %w", err)
+	}
+	// the files of a folder by path, in the case LIKE ignores: the look at a folder lists them, and pairing
+	// live photos looks up each short video's photo by name — without it, each lookup read every photo, and
+	// the 536 videos with no photo of their own read 13 GB at every start (2026-10-19)
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assets_place ON assets(location, path COLLATE NOCASE)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("schema: %w", err)
+	}
+	// the same failure, added again at each start before AssetsWithoutJob left it out: the last one is kept
+	if _, err := db.Exec(`DELETE FROM jobs WHERE state = 'failed' AND EXISTS
+		(SELECT 1 FROM jobs n WHERE n.asset_id = jobs.asset_id AND n.kind = jobs.kind AND n.id > jobs.id)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("schema: %w", err)
 	}
@@ -568,7 +599,7 @@ func (s *Store) AddAsset(ctx context.Context, a *Asset, jobKinds []string) error
 
 const assetSelect = `SELECT a.id, a.owner_id, a.checksum, a.original_name, a.path, a.size, a.type, a.file_created_at, a.file_modified_at,
 	a.duration_ms, a.created_at, a.seq, coalesce(a.deleted_at, ''), a.favorite, a.shared, a.location, a.live_of,
-	coalesce((SELECT v.id FROM assets v WHERE v.live_of = a.id AND a.live_of = '' LIMIT 1), ''), e.asset_id, e.taken_at, e.local_time, e.zone_seconds, e.width, e.height, e.orientation,
+	coalesce((SELECT v.id FROM assets v WHERE v.live_of = a.id AND v.live_of != '' AND a.live_of = '' LIMIT 1), ''), e.asset_id, e.taken_at, e.local_time, e.zone_seconds, e.width, e.height, e.orientation,
 	e.make, e.model, e.lens, e.lat, e.lon, e.f_number, e.exposure_time, e.focal_length, e.iso, e.fps, e.city, e.state, e.country
 	FROM assets a LEFT JOIN asset_exif e ON e.asset_id = a.id`
 
@@ -689,31 +720,43 @@ func (s *Store) AddJob(ctx context.Context, assetID, kind string) error {
 	return err
 }
 
-// UndatedEdits lists iPhone edited copies (IMG_E…) that were read without a capture time and are not
-// waiting to be read: read again, they take the original's.
-func (s *Store) UndatedEdits(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM assets a JOIN asset_exif e ON e.asset_id = a.id
-		WHERE a.original_name LIKE 'IMG\_E%' ESCAPE '\' AND e.taken_at IS NULL AND a.deleted_at IS NULL
+// AskJob queues a job someone is waiting on, unless one is waiting, running or has given up already: it
+// answers with that one's state, or "queued" for the one it added. Such jobs go before the rest (ClaimJob).
+func (s *Store) AskJob(ctx context.Context, assetID, kind string) (state string, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE asset_id = ? AND kind = ? AND state IN ('queued', 'running', 'failed')
+		ORDER BY id DESC LIMIT 1`, assetID, kind).Scan(&state)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return state, err
+	}
+	return "queued", s.AddJob(ctx, assetID, kind)
+}
+
+// Undated lists the photos read without a capture time, or in a format not read at all (GIF, WebP), that
+// are not waiting to be read again: their id, location, path and name, to tell which can be given a day now.
+func (s *Store) Undated(ctx context.Context) ([]Asset, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.location, a.path, a.original_name FROM assets a LEFT JOIN asset_exif e ON e.asset_id = a.id
+		WHERE e.taken_at IS NULL AND a.deleted_at IS NULL
 		AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset_id = a.id AND j.kind = 'metadata' AND j.state IN ('queued', 'running'))`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []string
+	var out []Asset
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var a Asset
+		if err := rows.Scan(&a.ID, &a.Location, &a.Path, &a.OriginalName); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, a)
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
-// AssetsWithoutJob lists the assets that have no job of this kind waiting or running — or, with ever
-// set, that never had one at all.
+// AssetsWithoutJob lists the assets that have no job of this kind waiting, running or given up on — or,
+// with ever set, that never had one at all. One given up on is not tried again: the file stays unreadable,
+// and each start of the program added the same failure once more.
 func (s *Store) AssetsWithoutJob(ctx context.Context, kind string, ever bool) ([]string, error) {
-	states := ` AND j.state IN ('queued', 'running')`
+	states := ` AND j.state IN ('queued', 'running', 'failed')`
 	if ever {
 		states = ``
 	}
@@ -756,8 +799,21 @@ func (s *Store) RequeueRunning(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// ClaimJob hands out the oldest queued job of one of the given kinds; sql.ErrNoRows when there is none.
+// AskedKind is the job someone waits on with the page open — a full-size picture to zoom into. It goes
+// before the rest: behind a folder of 20,000 photos being read, it would come hours later.
+const AskedKind = "full"
+
+// ClaimJob hands out the oldest queued job of one of the given kinds, one asked for first (AskedKind);
+// sql.ErrNoRows when there is none.
 func (s *Store) ClaimJob(ctx context.Context, kinds []string) (j Job, err error) {
+	if slices.Contains(kinds, AskedKind) {
+		err = s.db.QueryRowContext(ctx, `UPDATE jobs SET state = 'running', attempts = attempts + 1
+			WHERE id = (SELECT id FROM jobs WHERE state = 'queued' AND kind = '`+AskedKind+`' ORDER BY id LIMIT 1)
+			RETURNING id, asset_id, kind, attempts`).Scan(&j.ID, &j.AssetID, &j.Kind, &j.Attempts)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return
+		}
+	}
 	marks := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
 	args := make([]any, len(kinds))
 	for i, k := range kinds {
@@ -843,7 +899,7 @@ func (s *Store) HasFaces(ctx context.Context, assetID string) (bool, error) {
 // FaceDescriptions returns every face of one person's library with its description, for comparing a new
 // face against. Only id, person and description are filled in.
 func (s *Store) FaceDescriptions(ctx context.Context, ownerID string) ([]Face, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, coalesce(person_id, ''), embedding FROM faces WHERE owner_id = ?`, ownerID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, asset_id, coalesce(person_id, ''), embedding FROM faces WHERE owner_id = ?`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -852,7 +908,7 @@ func (s *Store) FaceDescriptions(ctx context.Context, ownerID string) ([]Face, e
 	for rows.Next() {
 		var f Face
 		var raw []byte
-		if err := rows.Scan(&f.ID, &f.PersonID, &raw); err != nil {
+		if err := rows.Scan(&f.ID, &f.AssetID, &f.PersonID, &raw); err != nil {
 			return nil, err
 		}
 		f.Embedding = unpackFloats(raw)
@@ -1373,10 +1429,14 @@ type Sibling struct {
 }
 
 // Siblings lists the owner's files in one location whose path is stem plus a dot and an ending.
+// siblings finds the files named stem.* through assets_place by their range (LIKE with ESCAPE never uses
+// an index); LIKE keeps its sense.
+const siblings = `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id AND v.live_of != '')
+	FROM assets a WHERE a.owner_id = ? AND a.location = ? AND a.path >= ? COLLATE NOCASE AND a.path < ? COLLATE NOCASE AND a.path LIKE ? ESCAPE '\'`
+
 func (s *Store) Siblings(ctx context.Context, ownerID, location, stem string) ([]Sibling, error) {
 	like := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(stem) + `.%`
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.type, a.path, a.live_of, a.duration_ms, EXISTS (SELECT 1 FROM assets v WHERE v.live_of = a.id)
-		FROM assets a WHERE a.owner_id = ? AND a.location = ? AND a.path LIKE ? ESCAPE '\'`, ownerID, location, like)
+	rows, err := s.db.QueryContext(ctx, siblings, ownerID, location, stem+".", stem+"/", like)
 	if err != nil {
 		return nil, err
 	}
@@ -1584,6 +1644,48 @@ func (s *Store) Skipped(ctx context.Context, location string) (map[string]bool, 
 	return out, rows.Err()
 }
 
+// FileCopy is a file of a read-only folder found to be the same photo as one in the library already: its
+// size and time when it was read, and what it held.
+type FileCopy struct {
+	Size     int64
+	Modified string
+	Checksum []byte
+}
+
+// NoteCopy remembers a file found to be a photo the library has already, so that the next look at its
+// folder need not read it through again: every start of the program read every such file, 25 GB on a
+// laptop's disk for two folders that are mostly the same photos (2026-10-19).
+func (s *Store) NoteCopy(ctx context.Context, location, path string, c FileCopy) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO copies (location, path, size, modified, checksum) VALUES (?,?,?,?,?)`,
+		location, path, c.Size, c.Modified, c.Checksum)
+	return err
+}
+
+// Copies lists the files of a folder noted by NoteCopy, by path.
+func (s *Store) Copies(ctx context.Context, location string) (map[string]FileCopy, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT path, size, modified, checksum FROM copies WHERE location = ?`, location)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]FileCopy{}
+	for rows.Next() {
+		var path string
+		var c FileCopy
+		if err := rows.Scan(&path, &c.Size, &c.Modified, &c.Checksum); err != nil {
+			return nil, err
+		}
+		out[path] = c
+	}
+	return out, rows.Err()
+}
+
+// ForgetCopy drops a file noted by NoteCopy: gone from its folder, or read in after all.
+func (s *Store) ForgetCopy(ctx context.Context, location, path string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM copies WHERE location = ? AND path = ?`, location, path)
+	return err
+}
+
 // RemoveLocation forgets a folder that holds no photos; one that holds any stays.
 func (s *Store) RemoveLocation(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM locations WHERE id = ? AND id NOT IN (SELECT location FROM assets)`, id)
@@ -1591,7 +1693,9 @@ func (s *Store) RemoveLocation(ctx context.Context, id string) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		_, err = s.db.ExecContext(ctx, `DELETE FROM skipped WHERE location = ?`, id)
+		if _, err = s.db.ExecContext(ctx, `DELETE FROM skipped WHERE location = ?`, id); err == nil {
+			_, err = s.db.ExecContext(ctx, `DELETE FROM copies WHERE location = ?`, id)
+		}
 	}
 	return err
 }
@@ -2315,6 +2419,92 @@ func (s *Store) TrashedAssets(ctx context.Context, ownerID string, limit int) ([
 	return out, rows.Err()
 }
 
+// forgetFaces removes a photo's faces in tx; a person left with none goes too, and one whose shown face
+// went shows another. people gets, for each person changed, the face to show now or "" if gone.
+func forgetFaces(ctx context.Context, tx *sql.Tx, assetID string, gone func(kind, a, b string) error, changed map[string]string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, coalesce(person_id, '') FROM faces WHERE asset_id = ?`, assetID)
+	if err != nil {
+		return err
+	}
+	var faceIDs []string
+	people := map[string]bool{}
+	for rows.Next() {
+		var faceID, personID string
+		if err := rows.Scan(&faceID, &personID); err != nil {
+			rows.Close()
+			return err
+		}
+		faceIDs = append(faceIDs, faceID)
+		if personID != "" {
+			people[personID] = true
+		}
+	}
+	rows.Close()
+	for _, faceID := range faceIDs {
+		if err := gone("face", faceID, ""); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE asset_id = ?`, assetID); err != nil {
+		return err
+	}
+	for personID := range people {
+		var shown string
+		var next sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT p.face_id, (SELECT id FROM faces WHERE person_id = p.id ORDER BY (x2 - x1) DESC LIMIT 1) FROM persons p WHERE p.id = ?`, personID).Scan(&shown, &next); err != nil {
+			return err
+		}
+		seq, err := nextSeq(ctx, tx)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !next.Valid: // nobody left to show
+			if _, err := tx.ExecContext(ctx, `DELETE FROM persons WHERE id = ?`, personID); err != nil {
+				return err
+			}
+			if err := gone("person", personID, ""); err != nil {
+				return err
+			}
+			changed[personID] = ""
+		default:
+			stillThere := 0
+			tx.QueryRowContext(ctx, `SELECT count(*) FROM faces WHERE id = ?`, shown).Scan(&stillThere)
+			if stillThere == 0 {
+				shown = next.String
+				changed[personID] = shown
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE persons SET face_id = ?, updated_at = ?, seq = ? WHERE id = ?`, shown, Timestamp(time.Now()), seq, personID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ForgetFaces removes the faces found in one of the owner's photos, so that they can be looked for again:
+// for each person changed, the face to show now, or "" if the person is gone.
+func (s *Store) ForgetFaces(ctx context.Context, ownerID, assetID string) (map[string]string, error) {
+	changed := map[string]string{}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return changed, err
+	}
+	defer tx.Rollback()
+	gone := func(kind, a, b string) error {
+		seq, err := nextSeq(ctx, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO deletions (seq, owner_id, kind, a, b) VALUES (?,?,?,?,?)`, seq, ownerID, kind, a, b)
+		return err
+	}
+	if err := forgetFaces(ctx, tx, assetID, gone, changed); err != nil {
+		return changed, err
+	}
+	return changed, tx.Commit()
+}
+
 // ── deleting ────────────────────────────────────────────────────────────────────────────────────────────────
 
 // Removed is what is left to clean up on disk after a photo's record is gone.
@@ -2347,62 +2537,8 @@ func (s *Store) DeleteAsset(ctx context.Context, ownerID, assetID string) (Remov
 		return err
 	}
 	// faces, and the people they belonged to
-	rows, err := tx.QueryContext(ctx, `SELECT id, coalesce(person_id, '') FROM faces WHERE asset_id = ?`, assetID)
-	if err != nil {
+	if err := forgetFaces(ctx, tx, assetID, gone, out.People); err != nil {
 		return out, err
-	}
-	var faceIDs []string
-	people := map[string]bool{}
-	for rows.Next() {
-		var faceID, personID string
-		if err := rows.Scan(&faceID, &personID); err != nil {
-			rows.Close()
-			return out, err
-		}
-		faceIDs = append(faceIDs, faceID)
-		if personID != "" {
-			people[personID] = true
-		}
-	}
-	rows.Close()
-	for _, faceID := range faceIDs {
-		if err := gone("face", faceID, ""); err != nil {
-			return out, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM faces WHERE asset_id = ?`, assetID); err != nil {
-		return out, err
-	}
-	for personID := range people {
-		var shown string
-		var next sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT p.face_id, (SELECT id FROM faces WHERE person_id = p.id ORDER BY (x2 - x1) DESC LIMIT 1) FROM persons p WHERE p.id = ?`, personID).Scan(&shown, &next); err != nil {
-			return out, err
-		}
-		seq, err := nextSeq(ctx, tx)
-		if err != nil {
-			return out, err
-		}
-		switch {
-		case !next.Valid: // nobody left to show
-			if _, err := tx.ExecContext(ctx, `DELETE FROM persons WHERE id = ?`, personID); err != nil {
-				return out, err
-			}
-			if err := gone("person", personID, ""); err != nil {
-				return out, err
-			}
-			out.People[personID] = ""
-		default:
-			stillThere := 0
-			tx.QueryRowContext(ctx, `SELECT count(*) FROM faces WHERE id = ?`, shown).Scan(&stillThere)
-			if stillThere == 0 {
-				shown = next.String
-				out.People[personID] = shown
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE persons SET face_id = ?, updated_at = ?, seq = ? WHERE id = ?`, shown, Timestamp(time.Now()), seq, personID); err != nil {
-				return out, err
-			}
-		}
 	}
 	// albums it was in count as changed
 	seq, err := nextSeq(ctx, tx)
@@ -2414,7 +2550,7 @@ func (s *Store) DeleteAsset(ctx context.Context, ownerID, assetID string) (Remov
 		return out, err
 	}
 	for _, q := range []string{`DELETE FROM album_assets WHERE asset_id = ?`, `DELETE FROM asset_exif WHERE asset_id = ?`, `DELETE FROM coupons WHERE asset_id = ?`, `DELETE FROM memory_assets WHERE asset_id = ?`,
-		`DELETE FROM shared_link_assets WHERE asset_id = ?`, `DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
+		`DELETE FROM shared_link_assets WHERE asset_id = ?`, `DELETE FROM screenshots WHERE asset_id = ?`, `DELETE FROM jobs WHERE asset_id = ?`, `DELETE FROM assets WHERE id = ?`} {
 		if _, err := tx.ExecContext(ctx, q, assetID); err != nil {
 			return out, err
 		}

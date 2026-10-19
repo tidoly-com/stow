@@ -152,9 +152,23 @@
 
     // Photos arriving from a phone, or changed on another device, show without reloading. The server
     // names the month of a new photo: a month on the page is fetched again; one the page does not have
-    // yet means the page itself is. While a photo is open or some are chosen, it waits.
+    // yet means the page itself is. While a photo is open or some are chosen, it waits. Only the months
+    // named are fetched, and no more often than every few seconds: while thousands of photos are being
+    // read, the news never stops, and fetching every month on the page each time kept a laptop's disk busy.
+    // A month the page lacks may not belong here at all (a photo of another place, or another person's,
+    // on a narrowed page): the page is asked first for its months, at most twice a minute, and reloaded
+    // only when there is a new one — reloading on the news alone did so every two seconds, for ever.
     if (window.EventSource) {
-      let wait = null, reload = false;
+      let wait = null, reload = false, all = false, last = 0, checked = 0;
+      const named = new Set();
+      const lookForNewMonths = () => fetch(location.pathname + location.search, { credentials: "same-origin" })
+        .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+        .then((html) => {
+          const have = new Set(months.map((s) => s.dataset.month));
+          const page = new DOMParser().parseFromString(html, "text/html");
+          if (Array.from(page.querySelectorAll("section[data-month]")).some((s) => !have.has(s.dataset.month))) location.reload();
+        })
+        .catch(() => {});
       const refetch = (section) => fetch("/web/month/" + section.dataset.month + (main.dataset.query || location.search), { credentials: "same-origin" })
         .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
         .then((html) => { if (section.dataset.loaded) { const box = section.querySelector(".days"); box.innerHTML = html; dress(box); } })
@@ -162,14 +176,22 @@
       const apply = () => {
         wait = null;
         if ((viewer && viewer.open) || picked.size) { wait = setTimeout(apply, 2000); return; }
-        if (reload) return location.reload();
-        months.forEach((s) => { if (s.dataset.loaded) refetch(s); });
+        if (reload) {
+          const left = checked + 30000 - Date.now();
+          if (left <= 0) { reload = false; checked = Date.now(); lookForNewMonths(); }
+          else wait = setTimeout(apply, Math.min(left, 5000)); // the months named meanwhile still come every few seconds
+        }
+        months.forEach((s) => { if (s.dataset.loaded && (all || named.has(s.dataset.month))) refetch(s); });
+        named.clear();
+        all = false;
+        last = Date.now();
       };
       new EventSource("/web/events").addEventListener("message", (event) => {
         const { month } = JSON.parse(event.data);
         if (month && !months.some((s) => s.dataset.month === month) && !main.dataset.query) reload = true;
-        clearTimeout(wait);
-        wait = setTimeout(apply, 800); // a phone sends many at once: one fetch for the lot
+        if (month) named.add(month);
+        else all = true;
+        if (!wait) wait = setTimeout(apply, Math.max(800, last + 5000 - Date.now())); // a phone sends many at once: one fetch for the lot
       });
     }
   }
@@ -390,7 +412,7 @@
       area.value = text;
       area.style.position = "fixed";
       area.style.opacity = "0";
-      document.body.append(area);
+      (document.querySelector("dialog[open]") || document.body).append(area); // outside an open dialog the page is inert: nothing could be selected, and the clipboard would be emptied
       area.select();
       const ok = document.execCommand("copy");
       area.remove();
@@ -428,6 +450,30 @@
     if (form) form.submit();
   });
 
+  // A part of the page that is still moving — the work in the background, a folder being looked at — is
+  // fetched again until it settles. Only that part: reloading the page would close a window opened on it.
+  const keepFresh = (selector, moving, every) => {
+    const tick = () => {
+      const part = document.querySelector(selector);
+      if (!part || !moving(part)) return;
+      setTimeout(() => {
+        if (sheet && sheet.open) return tick(); // choosing a folder, say: wait until it is closed
+        fetch(location.pathname + location.search, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+          .then((html) => {
+            const fresh = new DOMParser().parseFromString(html, "text/html").querySelector(selector);
+            const now = document.querySelector(selector);
+            if (fresh && now) now.replaceWith(fresh);
+          })
+          .catch(() => {}) // the server is busy or restarting: try again next time
+          .finally(tick);
+      }, every);
+    };
+    tick();
+  };
+  keepFresh("#jobs", (part) => part.hasAttribute("data-working"), 5000);
+  keepFresh("#folders", (part) => part.querySelector("[data-running]"), 2000);
+
   // Choosing a folder on the server's machine, one step at a time.
   const browse = document.querySelectorAll("[data-browse]");
   if (browse.length) {
@@ -441,7 +487,6 @@
         if (!sheet.open) sheet.showModal();
       }, failed);
     browse.forEach((b) => b.addEventListener("click", () => { purpose = b.dataset.browse; next = b.dataset.next || ""; open(""); }));
-    if (document.querySelector("[data-running]")) setTimeout(() => location.reload(), 2000); // a folder is being looked at: show how far
     sheet.addEventListener("click", (event) => {
       if (!sheet.classList.contains("picker")) return;
       const button = event.target.closest("button");
@@ -497,10 +542,20 @@
       img.style.transform = zoom.s === 1 ? "" : "translate(" + zoom.x + "px, " + zoom.y + "px) scale(" + zoom.s + ")";
       viewer.classList.toggle("zoomed", zoom.s > 1);
       if (zoom.s > 1 && img.dataset.full) {
-        const full = new Image();
-        full.onload = () => { if (img.isConnected) img.src = full.src; };
-        full.src = img.dataset.full;
+        // a HEIC photo's full-size picture may still be in the making (202): ask again a little later,
+        // while this photo is still the one shown, and meanwhile go on zooming the preview
+        const url = img.dataset.full;
         delete img.dataset.full;
+        const swap = () => {
+          const full = new Image();
+          full.onload = () => { if (img.isConnected) img.src = full.src; };
+          full.src = url;
+        };
+        const ask = (tries) => fetch(url, { method: "HEAD", credentials: "same-origin" }).then((res) => {
+          if (res.status === 202 && tries > 0 && img.isConnected) setTimeout(() => ask(tries - 1), 1500);
+          else if (res.ok && res.status !== 202) swap();
+        }).catch(() => {});
+        if (url.endsWith("/full")) ask(80); else swap();
       }
     };
     const zoomTo = (scale, atX, atY) => {

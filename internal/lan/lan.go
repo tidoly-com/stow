@@ -9,6 +9,10 @@
 // through it was sent to the domain — the tunnel's server routes by that name and passes it on. At home
 // one uses this machine's address on the network (an IP address), localhost, or its .local name.
 // A Host made up at home to look like the domain only takes rights away.
+//
+// A request that came over TLS is from outside, whatever its Host: this server takes https only on the
+// port the tunnel hands the domain's https to, and the tunnel's server picks the way by the TLS name alone,
+// never looking at the Host inside — sent with "Host: 127.0.0.1", it passed for one made at home (2026-10-19).
 package lan
 
 import (
@@ -18,7 +22,7 @@ import (
 )
 
 // From says whether the request was made at home.
-func From(r *http.Request) bool { return Host(r.Host) }
+func From(r *http.Request) bool { return r.TLS == nil && Host(r.Host) }
 
 // Host says whether an address one reaches this server by is a home one.
 func Host(hostport string) bool {

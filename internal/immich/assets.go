@@ -359,7 +359,8 @@ func (s *Server) serveOriginal(w http.ResponseWriter, r *http.Request, asset sto
 }
 
 // serveThumbnail sends a small picture made earlier by the thumbnail job. It never makes one: a request
-// that arrives before the job has run gets the original (a photo) or a blank (a video) instead.
+// that arrives before the job has run gets the original (a photo) or a blank (a video, or a photo through a
+// shared link that keeps originals back) instead.
 func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset store.Asset) {
 	sizes := []string{"thumbnail"}
 	if size := r.URL.Query().Get("size"); size == "preview" || size == "fullsize" {
@@ -374,7 +375,7 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset st
 			return
 		}
 	}
-	if asset.Type == "VIDEO" {
+	if asset.Type == "VIDEO" || keepsOriginal(r) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Cache-Control", "no-store") // the real one is on its way
 		w.Write(tinyJPEG)
@@ -382,6 +383,54 @@ func (s *Server) serveThumbnail(w http.ResponseWriter, r *http.Request, asset st
 	}
 	w.Header().Set("Cache-Control", "no-store") // stands in for the small picture until it is made; a browser that cannot show it (HEIC) must ask again
 	s.serveOriginal(w, r, asset)
+}
+
+// NeedsFull tells a photo whose original browsers cannot show (HEIC): to look closer, a full-size JPEG is
+// made from it the first time someone zooms in (stow issue #3).
+func NeedsFull(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".heic", ".heif":
+		return true
+	}
+	return false
+}
+
+// serveFull sends the full-size JPEG of a HEIC photo. The first time, it asks for one to be made and
+// answers 202: the page keeps showing the preview and asks again. It is made by the job runner, so that
+// many photos zoomed into at once decode no more at a time than there are workers.
+func (s *Server) serveFull(w http.ResponseWriter, r *http.Request, asset store.Asset) {
+	if f, err := os.Open(s.cfg.Thumbs.Path(asset.ID, "full")); err == nil {
+		defer f.Close()
+		stat, _ := f.Stat()
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		http.ServeContent(w, r, asset.ID+".jpg", stat.ModTime(), f)
+		return
+	}
+	if asset.Type != "IMAGE" || !NeedsFull(asset.OriginalName) || s.cfg.Thumbs.FFmpeg == "" {
+		writeError(w, 404, "Not found")
+		return
+	}
+	state, err := s.store.AskJob(r.Context(), asset.ID, store.AskedKind)
+	if err != nil {
+		writeError(w, 500, "Internal error")
+		return
+	}
+	if state == "failed" {
+		writeError(w, 404, "Not found") // it could not be made; the preview is what there is
+		return
+	}
+	s.runner.Wake()
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// MakeFull is the "full" job: the full-size JPEG of a HEIC photo someone zoomed into.
+func (s *Server) MakeFull(ctx context.Context, assetID string) error {
+	asset, err := s.store.AssetByID(ctx, assetID)
+	if err != nil {
+		return err
+	}
+	return s.cfg.Thumbs.MakeFull(ctx, s.lib.Path(asset.Location, asset.Path), assetID)
 }
 
 // MakeThumbnail is the "thumbnail" job: make the small pictures, then tell the person's devices that the
@@ -419,15 +468,30 @@ func (s *Server) MakeThumbnail(ctx context.Context, assetID string) error {
 	return err
 }
 
-// QueueUndatedEdits reads again the iPhone edited copies read without a capture time — before copies took
-// the original's — so that they leave the day they were exported.
-func (s *Server) QueueUndatedEdits(ctx context.Context) (queued int, err error) {
-	ids, err := s.store.UndatedEdits(ctx)
+// namedPath is what a photo's day may be read from when the photo carries none: its path in someone's own
+// folder, which they named; for a photo taken in, only the name it came with — the folders above it are
+// this server's own (originals/<person>/<year>/<month>), made from the day it came.
+func (s *Server) namedPath(location, rel, name string) string {
+	if location != "" && s.lib.ReadOnly(location) {
+		return rel
+	}
+	return name
+}
+
+// QueueUndated reads again the photos read without a capture time that can now be given one: iPhone edited
+// copies, which take the original's, and photos whose name or folders tell their day — read before either
+// was done, they stayed on the day they were copied.
+func (s *Server) QueueUndated(ctx context.Context) (queued int, err error) {
+	undated, err := s.store.Undated(ctx)
 	if err != nil {
 		return 0, err
 	}
-	for _, id := range ids {
-		if err := s.store.AddJob(ctx, id, "metadata"); err != nil {
+	for _, a := range undated {
+		_, named := media.DateFromPath(s.namedPath(a.Location, a.Path, a.OriginalName), time.Local)
+		if !named && !appleEdit.MatchString(a.OriginalName) {
+			continue // read again, it would come out undated again
+		}
+		if err := s.store.AddJob(ctx, a.ID, "metadata"); err != nil {
 			return queued, err
 		}
 		queued++
@@ -439,7 +503,9 @@ func (s *Server) QueueUndatedEdits(ctx context.Context) (queued int, err error) 
 }
 
 // QueueMissingThumbnails queues the thumbnail job for every asset without small pictures: photos taken
-// in by a version of the program that made none, or a derived/ folder that was deleted.
+// in by a version of the program that made none, or a derived/ folder that was deleted. A file of a kind
+// none is made for (GIF, WebP, a video ffmpeg does not know) is left out: queued at every start, it told
+// every open page of a changed photo each time.
 func (s *Server) QueueMissingThumbnails(ctx context.Context) (queued int, err error) {
 	ids, err := s.store.AssetsWithoutJob(ctx, "thumbnail", false)
 	if err != nil {
@@ -448,6 +514,11 @@ func (s *Server) QueueMissingThumbnails(ctx context.Context) (queued int, err er
 	for _, id := range ids {
 		if s.cfg.Thumbs.Has(id) {
 			continue
+		}
+		if a, err := s.store.AssetByID(ctx, id); err == nil {
+			if info, err := media.Read(s.lib.Path(a.Location, a.Path), time.Local); err == nil && info.Kind == "" {
+				continue
+			}
 		}
 		if err := s.store.AddJob(ctx, id, "thumbnail"); err != nil {
 			return queued, err
@@ -705,11 +776,16 @@ func (s *Server) ReadMetadata(ctx context.Context, assetID string) error {
 	if err != nil {
 		return err
 	}
-	if info.Kind == "" {
-		return nil
-	}
-	if info.Taken.IsZero() {
+	if info.Kind != "" && info.Taken.IsZero() {
 		borrowFromOriginal(file, &info)
+	}
+	if info.Taken.IsZero() { // nothing in the photo: the day its name or folders tell, as the clock where it was filed
+		if t, ok := media.DateFromPath(s.namedPath(asset.Location, asset.Path, asset.OriginalName), time.Local); ok {
+			info.Taken, info.Wall = t, time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC)
+		}
+	}
+	if info.Kind == "" && info.Taken.IsZero() {
+		return nil // a format this server does not read (GIF, WebP), and no day in its name or folders either
 	}
 	meta := store.Meta{Width: info.Width, Height: info.Height, Orientation: info.Orientation, ISO: info.ISO,
 		Make: info.Make, Model: info.Model, Lens: info.Lens,
@@ -735,6 +811,11 @@ func (s *Server) ReadMetadata(ctx context.Context, assetID string) error {
 		s.runner.Wake()
 	}
 	if asset.Type == "IMAGE" && asset.LiveOf == "" && asset.DeletedAt == "" {
+		read := asset
+		read.Meta = &meta
+		if err := s.fileScreenshot(ctx, read); err != nil {
+			return err
+		}
 		if err := s.queueCoupon(ctx, assetID, info.Make); err != nil {
 			return err
 		}

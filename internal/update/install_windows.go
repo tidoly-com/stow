@@ -17,7 +17,7 @@ import (
 
 // install downloads stow-install.exe, checks it against the release's SHA256SUMS, and starts it apart from
 // this program: it asks the app to quit, puts the new one in place and opens it.
-func install(ctx context.Context, base string) (*exec.Cmd, error) {
+func install(ctx context.Context, base string) (func() error, error) {
 	sums, err := fetch(ctx, base+"/SHA256SUMS")
 	if err != nil {
 		return nil, err
@@ -47,8 +47,10 @@ func install(ctx context.Context, base string) (*exec.Cmd, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return cmd, nil
+	return cmd.Wait, nil
 }
+
+func byButton() bool { return true }
 
 func fetch(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
