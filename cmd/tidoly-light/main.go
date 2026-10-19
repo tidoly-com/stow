@@ -191,7 +191,7 @@ func main() {
 	defer vpnSet.VPN.Close()
 	keeper.Home = api.CallHome
 	keeper.Ready = func() { out.set(api.Link()) } // the tunnel takes https now
-	tun.Waiting = api.TunnelWaiting // the week's new tunnels taken: its place in tidoly's line
+	tun.Waiting = api.TunnelWaiting               // the week's new tunnels taken: its place in tidoly's line
 
 	if err := api.LoadLocations(ctx); err != nil {
 		log.Fatalf("storage: %v", err)
