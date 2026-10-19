@@ -233,7 +233,12 @@ func TestAServerInTheLineIsToldItsPlace(t *testing.T) {
 	asked := 0
 	var mu sync.Mutex
 	tun := &Tunnel{Server: f.addr, LocalPort: local(t), Dir: t.TempDir(), Roots: f.ca,
-		Waiting: func(context.Context) (int, time.Time, bool) { mu.Lock(); defer mu.Unlock(); asked++; return 3, opens, true }}
+		Waiting: func(context.Context) (int, time.Time, bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked++
+			return 3, opens, true
+		}}
 	defer tun.Close()
 	tun.Set("mom", "tdly_stow_queued", "", false)
 	waitFor(t, "the place in the line", func() bool { return strings.Contains(tun.State(), "대기 3번째") })
