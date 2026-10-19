@@ -493,6 +493,39 @@ func (s *Server) fetchTunnel(ctx context.Context) error {
 	return s.setLink(ctx, l)
 }
 
+// TunnelWaiting asks home where this server is in the line for a tunnel, which it joins when the week's
+// new tunnels are taken: its place, and when the next place opens. ok is false when it is not in the line
+// (home leaves the field out), or home cannot be asked.
+func (s *Server) TunnelWaiting(ctx context.Context) (position int, opensAt time.Time, ok bool) {
+	if s.Link().Key == "" {
+		return 0, time.Time{}, false
+	}
+	req, err := s.homeRequest(ctx, "GET", "/stow/tunnel", nil)
+	if err != nil {
+		return 0, time.Time{}, false
+	}
+	res, err := s.homeClient().Do(req)
+	if err != nil {
+		log.Printf("tunnel line: %v", err)
+		return 0, time.Time{}, false
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		log.Printf("tunnel line: %s", res.Status)
+		return 0, time.Time{}, false
+	}
+	var body struct {
+		Waiting *struct {
+			Position int       `json:"position"`
+			OpensAt  time.Time `json:"opensAt"`
+		} `json:"waiting"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil || body.Waiting == nil || body.Waiting.Position < 1 {
+		return 0, time.Time{}, false
+	}
+	return body.Waiting.Position, body.Waiting.OpensAt, true
+}
+
 func (s *Server) fetchMembers(ctx context.Context) ([]string, error) {
 	req, err := s.homeRequest(ctx, "GET", "/stow/members?slug="+url.QueryEscape(s.Link().Slug), nil)
 	if err != nil {

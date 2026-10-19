@@ -12,6 +12,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -36,6 +37,10 @@ type Tunnel struct {
 	TLSPort   int    // where it takes https with its own certificate, on 127.0.0.1; 0 if it does not
 	Dir       string // where the roots file is written for frp to read
 	Roots     []byte // the certificates frps's must chain to, PEM; nil for the ones carried here
+	// Waiting asks tidoly where this server is in the line for a tunnel, when the frps says it waits for a
+	// place: its place in the line, and when the next place opens. ok is false when it is not in the line,
+	// or tidoly cannot be asked. nil: the line is told without them.
+	Waiting func(ctx context.Context) (position int, opensAt time.Time, ok bool)
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -118,10 +123,25 @@ func (t *Tunnel) keep(ctx context.Context, slug, key, server string, https bool)
 	}
 }
 
+// waitsForAPlace says whether the frps turned the name down because the week's new tunnels are taken: the
+// address, key and certificate are this server's already, and frpc, trying again every 30 s, gets in by
+// itself once its turn comes.
+func waitsForAPlace(err string) bool { return strings.Contains(err, "waiting") }
+
+const waiting = "터널 자리를 기다리는 중입니다 — 차례가 오면 저절로 연결되고 메일로 알려 드립니다"
+
+// inLine puts the place in the line in words; the place is asked for again every so often, as it moves.
+func inLine(position int, opensAt time.Time) string {
+	return fmt.Sprintf("대기 %d번째 · 다음 자리는 %s 에 열립니다 · 차례가 오면 저절로 연결되고 메일로 알려 드립니다",
+		position, opensAt.Local().Format("1월 2일 15:04"))
+}
+
 // problem puts what went wrong in words for the owner.
 func problem(err error) string {
 	text := err.Error()
 	switch {
+	case waitsForAPlace(text):
+		return waiting
 	case strings.Contains(text, "not allowed"):
 		return "tidoly 가 이 서버의 열쇠를 받지 않습니다 — 다른 PC 가 같은 주소로 연결했거나 tidoly 가 이 주소를 멈췄습니다"
 	default:
@@ -185,6 +205,7 @@ func (t *Tunnel) run(ctx context.Context, slug, key, server string, https bool) 
 	go func() { failed <- svc.Run(ctx) }()
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
+	var asked time.Time // when the place in the line was last asked for: as often as frpc tries again
 	for {
 		select {
 		case err := <-failed:
@@ -205,7 +226,20 @@ func (t *Tunnel) run(ctx context.Context, slug, key, server string, https bool) 
 					case "running":
 						up++
 					case "start error", "check failed":
-						t.setState(problem(errors.New(status.Err)))
+						if !waitsForAPlace(status.Err) {
+							t.setState(problem(errors.New(status.Err)))
+							break
+						}
+						if time.Since(asked) < 30*time.Second {
+							break
+						}
+						asked = time.Now()
+						t.setState(waiting)
+						if t.Waiting != nil {
+							if position, opensAt, ok := t.Waiting(ctx); ok {
+								t.setState(inLine(position, opensAt))
+							}
+						}
 					}
 				}
 			}
