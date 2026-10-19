@@ -1,6 +1,10 @@
 package lan
 
-import "testing"
+import (
+	"crypto/tls"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestHost(t *testing.T) {
 	for host, want := range map[string]bool{
@@ -29,5 +33,18 @@ func TestHost(t *testing.T) {
 		if got := Host(host); got != want {
 			t.Errorf("Host(%q) = %v, want %v", host, got, want)
 		}
+	}
+}
+
+// Over TLS a request is from outside, even with a home Host: https comes only through the tunnel.
+func TestTLSIsFromOutside(t *testing.T) {
+	r := httptest.NewRequest("GET", "/login", nil)
+	r.Host = "127.0.0.1"
+	if !From(r) {
+		t.Error("plain http to 127.0.0.1 is from home")
+	}
+	r.TLS = &tls.ConnectionState{ServerName: "demo.stow.tidoly.app"}
+	if From(r) {
+		t.Error("https with Host 127.0.0.1 passed for home")
 	}
 }
