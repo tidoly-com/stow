@@ -97,7 +97,12 @@ type Web struct {
 	Empty          func(ctx context.Context, userID string) (int, error)
 	Days           int       // how long the trash keeps a photo
 	Links          LinkFuncs // shared links (#13), while the tunnel is on
-	mux            *http.ServeMux
+	// what a build brings beside the photos: its name after ours on the top bar, its sets of pages, and
+	// the routes those pages answer on
+	Edition string
+	Spaces  []Space
+	Mount   []func(m *http.ServeMux)
+	mux     *http.ServeMux
 }
 
 const trashLimit = 2000 // photos shown in the trash
@@ -277,6 +282,10 @@ func (w *Web) frame(ctx context.Context, user store.User, title, tab string) map
 		me = user.Email
 	}
 	data := map[string]any{"Title": title, "Tab": tab, "User": user, "Me": initial(me), "Version": w.Version, "LinksOn": w.linksOn()}
+	data["Edition"], data["Spaces"] = w.Edition, w.Spaces
+	if s := w.space(tab); s != nil {
+		data["Space"] = s
+	}
 	dir := w.Dir // the disk shown is the one this person's next photo goes to
 	if id, err := w.Store.LocationFor(ctx, user.ID); err == nil && id != "" && w.LocationDir != nil && w.LocationDir(id) != "" {
 		dir = w.LocationDir(id)
@@ -384,6 +393,9 @@ func (w *Web) Handler(loginStart, logout http.HandlerFunc) http.Handler {
 	m.HandleFunc("POST /admin/tidoly/auto", w.page(w.adminTidoly))
 	m.HandleFunc("POST /admin/tidoly/seen", w.page(w.adminTidoly))
 	m.HandleFunc("POST /admin/users/block", w.page(w.adminTidoly))
+	for _, mount := range w.Mount {
+		mount(m)
+	}
 	w.mux = m
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		// nothing here may be framed by another site, and nothing loads from anywhere but this server

@@ -45,6 +45,10 @@ import (
 	"github.com/tidoly-com/stow/internal/web"
 )
 
+// extensions add pages beside the photos, given the web pages, the data folder and its hidden folder. This
+// repository has none; a build with more puts its own in from a file of its own, in init.
+var extensions []func(pages *web.Web, dataDir, hidden string) error
+
 func main() {
 	dataDir := flag.String("data", "data", "folder for the photos and the database")
 	configFile := flag.String("config", "", "settings file written by the setup (stow issue #18); without a folder in it, the setup is shown in the browser instead of the photos")
@@ -204,6 +208,11 @@ func main() {
 		SetAutoAdd: api.SetAutoAdd, Block: api.Block, Arrivals: api.Arrivals, SeenArrivals: api.SeenArrivals,
 		Contact:   *homeURL + "/contact",
 		AddFolder: api.AddFolder, PauseFolder: api.PauseFolder, ScanFolder: api.ScanFolder, RemoveFolder: api.RemoveFolder, FolderState: folderState(api), Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: immich.TrashDays}
+	for _, add := range extensions {
+		if err := add(pages, *dataDir, hidden); err != nil {
+			log.Fatalf("extension: %v", err)
+		}
+	}
 	api.Pages(pages.Handler(api.WebLoginStart, api.WebLogout))
 	runner.Handle("metadata", api.ReadMetadata)
 	runner.Handle("place", api.NamePlace)

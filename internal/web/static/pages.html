@@ -9,7 +9,7 @@
 {{define "nav"}}<input type="checkbox" id="drawer" hidden>
 <header class="top">
 <label for="drawer" class="icon burger" aria-label="메뉴">{{template "i" "menu"}}</label>
-<a class="brand" href="/">{{template "name"}}</a>
+<a class="brand" href="/">{{template "name"}}{{with .Edition}} <span class="edition">{{.}}</span>{{end}}</a>
 {{if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
 <details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
 <div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
@@ -31,12 +31,14 @@
 </div>{{end}}
 <label for="drawer" class="scrim"></label>
 <nav class="side">
-<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
+{{with .Spaces}}<div class="spaces" role="group" aria-label="공간"><a href="/"{{if not $.Space}} aria-current="page"{{end}}>사진</a>{{range .}}<a href="{{.Link}}"{{if and $.Space (eq .Name $.Space.Name)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>{{end}}
+{{with .Space}}{{range .Menu}}<a href="{{.Link}}"{{if eq .Tab $.Tab}} aria-current="page"{{end}}><svg class="i" aria-hidden="true"><use href="{{.Icon}}"/></svg>{{.Name}}</a>
+{{end}}{{else}}<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
 <a href="/?show=videos"{{if eq .Tab "videos"}} aria-current="page"{{end}}>{{template "i" "video"}}동영상</a>
 <a href="/people"{{if eq .Tab "people"}} aria-current="page"{{end}}>{{template "i" "people"}}인물</a>
 <a href="/places"{{if eq .Tab "places"}} aria-current="page"{{end}}>{{template "i" "place"}}장소</a>
 <a href="/albums"{{if eq .Tab "albums"}} aria-current="page"{{end}}>{{template "i" "album"}}앨범</a>
-<a href="/trash"{{if eq .Tab "trash"}} aria-current="page"{{end}}>{{template "i" "trash"}}휴지통</a>
+{{end}}<a href="/trash"{{if eq .Tab "trash"}} aria-current="page"{{end}}>{{template "i" "trash"}}휴지통</a>
 {{if .User.IsAdmin}}<a href="/admin"{{if eq .Tab "admin"}} aria-current="page"{{end}}>{{template "i" "admin"}}관리</a>{{end}}
 <div class="side-foot">
 <a class="small" href="/licenses"{{if eq .Tab "licenses"}} aria-current="page"{{end}}>오픈소스 라이선스 · AGPL-3.0</a>
