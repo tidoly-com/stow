@@ -151,6 +151,12 @@ th { color: var(--muted-foreground); font-weight: 500; }
 .side a { display: flex; align-items: center; gap: 16px; height: 48px; padding: 0 20px; border-radius: 0 var(--pill) var(--pill) 0; color: var(--foreground); font-weight: 500; }
 .side a:hover { background: var(--muted); }
 .side a[aria-current] { background: var(--accent); color: var(--accent-foreground); font-weight: 600; }
+/* with a second set of pages: a switch between it and the photos, above the menu of the side one is on */
+.spaces { display: flex; margin: 0 0 10px 12px; padding: 3px; border-radius: var(--pill); background: var(--muted); }
+.side .spaces a { flex: 1; justify-content: center; height: 36px; padding: 0; border-radius: var(--pill); font-size: .875rem; color: var(--muted-foreground); }
+.side .spaces a:hover { background: none; color: var(--foreground); }
+.side .spaces a[aria-current] { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px hsl(0 0% 0% / .1); }
+.edition { margin-left: 2px; padding: 0 7px; border: 1.5px solid currentColor; border-radius: var(--pill); font-size: .75rem; font-weight: 700; letter-spacing: 0; vertical-align: 3px; }
 /* at the foot of the menu, whatever its height: the licenses, the source, and who makes it */
 .side-foot { display: flex; flex-direction: column; gap: 0; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
 .side a.small { height: 32px; font-size: .8125rem; font-weight: 400; color: var(--muted-foreground); }
