@@ -23,6 +23,13 @@ type Space struct {
 // passes to Frame, so that the line shows as the place one is.
 type MenuItem struct{ Name, Icon, Link, Tab string }
 
+// SubItem is one line a page of a space puts under its own line of the menu, as SideSub: the pieces of
+// what is open, indented. Inner lines are one step further in; the Current one is the page one is on.
+type SubItem struct {
+	Name, Link     string
+	Inner, Current bool
+}
+
 // AddPages adds templates to those every page is drawn from, so that a space's own pages can use the
 // photos' head, menu and foot. It must be called before the server starts.
 func AddPages(fsys fs.FS, patterns ...string) {
