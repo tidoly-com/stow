@@ -198,7 +198,7 @@
 
   // Uploading from this browser: the files go to the same door the phone app uses, one after another, so
   // that a large batch neither floods the server nor loses everything to one failure.
-  const picker = document.querySelector(".upload input");
+  const picker = document.querySelector(".upload:not([data-own]) input"); // data-own: the page uploads its own way
   if (picker) {
     const label = picker.closest(".upload"), text = label.querySelector("span");
     const send = async (files) => {

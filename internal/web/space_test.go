@@ -35,4 +35,16 @@ func TestASpaceBringsASwitchAndItsOwnMenu(t *testing.T) {
 	if strings.Contains(notes, "인물") || !strings.Contains(notes, `<a href="/notes" aria-current="page">보관함</a>`) || !strings.Contains(notes, "메모</a>") || !strings.Contains(notes, "휴지통") {
 		t.Errorf("a page of the space:\n%s", notes)
 	}
+	// a page of the space may put the pieces of what is open under its line
+	w.Spaces[0].Menu = append(w.Spaces[0].Menu, MenuItem{Name: "허브", Icon: "/x.svg#hub", Link: "/hubs", Tab: "hubs"})
+	data := map[string]any{"Tab": "hubs", "User": store.User{}, "Edition": w.Edition, "Spaces": w.Spaces, "Space": w.space("hubs"),
+		"SideSub": []SubItem{{Name: "개발", Link: "/hubs/a", Current: true}, {Name: "#23", Link: "/hubs/b", Inner: true}}}
+	var b strings.Builder
+	if err := pages.ExecuteTemplate(&b, "nav", data); err != nil {
+		t.Fatal(err)
+	}
+	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page">개발</a><a href="/hubs/b" class="inner">#23</a></div>`) ||
+		strings.Count(hubs, "side-sub") != 1 {
+		t.Errorf("the pieces under the open line:\n%s", hubs)
+	}
 }

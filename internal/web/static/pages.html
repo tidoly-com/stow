@@ -10,7 +10,7 @@
 <header class="top">
 <label for="drawer" class="icon burger" aria-label="메뉴">{{template "i" "menu"}}</label>
 <a class="brand" href="/">{{template "name"}}{{with .Edition}} <span class="edition">{{.}}</span>{{end}}</a>
-{{if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
+{{if .UploadOwn}}<label class="upload button quiet" data-own><input type="file" multiple hidden>{{template "i" "upload"}}<span>올리기</span></label>{{else if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
 <details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
 <div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
 <a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a><a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
@@ -33,7 +33,8 @@
 <nav class="side">
 {{with .Spaces}}<div class="spaces" role="group" aria-label="공간"><a href="/"{{if not $.Space}} aria-current="page"{{end}}>사진</a>{{range .}}<a href="{{.Link}}"{{if and $.Space (eq .Name $.Space.Name)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>{{end}}
 {{with .Space}}{{range .Menu}}<a href="{{.Link}}"{{if eq .Tab $.Tab}} aria-current="page"{{end}}><svg class="i" aria-hidden="true"><use href="{{.Icon}}"/></svg>{{.Name}}</a>
-{{end}}{{else}}<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
+{{if and (eq .Tab $.Tab) $.SideSub}}<div class="side-sub">{{range $.SideSub}}<a href="{{.Link}}"{{if .Inner}} class="inner"{{end}}{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>
+{{end}}{{end}}{{else}}<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
 <a href="/?show=videos"{{if eq .Tab "videos"}} aria-current="page"{{end}}>{{template "i" "video"}}동영상</a>
 <a href="/people"{{if eq .Tab "people"}} aria-current="page"{{end}}>{{template "i" "people"}}인물</a>
 <a href="/places"{{if eq .Tab "places"}} aria-current="page"{{end}}>{{template "i" "place"}}장소</a>
