@@ -320,6 +320,7 @@ dialog { border: 0; padding: 0; }
 .viewer:focus { outline: none; }
 .viewer :focus-visible { outline: 1.5px solid hsl(0 0% 100% / .6); outline-offset: 0; } /* on black, for the keyboard only: thin and white */
 .viewer .grow { flex: 1; }
+.viewer .bar .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; color: #ccc; }
 .viewer .icon:hover, .viewer .button.quiet:hover { background: hsl(0 0% 100% / .14); }
 .viewer .button.quiet { color: #eee; border-color: hsl(0 0% 100% / .3); }
 .viewer [data-act=favorite][aria-pressed=true] { color: #ff6b81; }
