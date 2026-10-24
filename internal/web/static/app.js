@@ -317,8 +317,22 @@
   const viewer = document.querySelector(".viewer");
   let current = null;
   let zoom = { s: 1, x: 0, y: 0 }; // how far in the photo is, and how far it has been moved, in the viewer
-  const neighbour = (step) => { const all = cells(); return all[all.indexOf(current) + step] || null; };
+  // pictures given from outside the photos (window.StowViewer.open): their list, and which is shown
+  let outside = null;
+  const neighbour = (step) => {
+    if (outside) { const i = outside.at + step; return i >= 0 && i < outside.items.length ? i : null; }
+    const all = cells();
+    return all[all.indexOf(current) + step] || null;
+  };
+  const shown = () => {
+    zoom = { s: 1, x: 0, y: 0 };
+    viewer.classList.remove("zoomed", "moving");
+    viewer.querySelectorAll(".step").forEach((b) => { b.hidden = neighbour(Number(b.dataset.step)) === null; });
+    if (!viewer.open) viewer.showModal();
+    viewer.focus(); // not the first button: opened by a click, it would show a focus ring for nothing
+  };
   const show = (cell) => {
+    if (outside) { if (cell !== null) showOutside(cell); return; }
     if (!cell || !viewer) return;
     fetch("/web/photo/" + cell.dataset.photo, { credentials: "same-origin" })
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
@@ -326,13 +340,32 @@
         current = cell;
         cell.scrollIntoView({ block: "center" });
         viewer.innerHTML = html;
-        zoom = { s: 1, x: 0, y: 0 };
-        viewer.classList.remove("zoomed", "moving");
-        viewer.querySelectorAll(".step").forEach((b) => { b.hidden = !neighbour(Number(b.dataset.step)); });
-        if (!viewer.open) viewer.showModal();
-        viewer.focus(); // not the first button: opened by a click, it would show a focus ring for nothing
+        shown();
       })
       .catch(() => {});
+  };
+  // a picture of the list given from outside, drawn here as a photo is: the same bar, stage and steps
+  const showOutside = (at) => {
+    const item = outside.items[at];
+    outside.at = at;
+    const icon = (name) => '<svg class="i" aria-hidden="true"><use href="/static/icons.svg#' + name + '"/></svg>';
+    viewer.innerHTML = '<div class="bar"><button class="icon" data-act="close" aria-label="닫기">' + icon("back") + '</button><span class="title"></span><span class="grow"></span>'
+      + '<button class="icon" data-act="zoom" aria-label="확대">' + icon("zoom") + '</button><a class="icon" download aria-label="받기">' + icon("download") + "</a></div>"
+      + '<div class="stage"><button class="step" data-act="step" data-step="-1" aria-label="이전">' + icon("prev") + '</button><img alt="" draggable="false">'
+      + '<button class="step" data-act="step" data-step="1" aria-label="다음">' + icon("next") + "</button></div>";
+    viewer.querySelector(".title").textContent = item.name || "";
+    viewer.querySelector(".stage img").src = item.src;
+    const get = viewer.querySelector("a[download]");
+    if (item.download) { get.href = item.download; get.download = item.name || ""; } else get.remove();
+    shown();
+  };
+  // Other pages show their pictures in the same viewer: StowViewer.open([{src, name, download}], at)
+  window.StowViewer = {
+    open(items, at) {
+      if (!viewer || !items.length) return;
+      outside = { items, at: 0 };
+      showOutside(Math.min(Math.max(at || 0, 0), items.length - 1));
+    },
   };
   const step = (by) => show(neighbour(by));
 
@@ -676,6 +709,6 @@
       if (touchX !== null && zoom.s === 1 && Math.abs(moved) > 60 && !event.target.closest("video, .info")) step(moved < 0 ? 1 : -1);
       touchX = null;
     }, { passive: true });
-    viewer.addEventListener("close", () => { viewer.innerHTML = ""; current = null; }); // also stops a playing video
+    viewer.addEventListener("close", () => { viewer.innerHTML = ""; current = null; outside = null; }); // also stops a playing video
   }
 })();
