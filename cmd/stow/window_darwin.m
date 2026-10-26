@@ -4,7 +4,8 @@
 
 // macOS hands ⌘C/⌘V/⌘X/⌘A/⌘Z to the Edit menu's items; webview makes no menu, so without one the
 // keyboard cannot paste into the pages (tidoly's installer found this, 2026-07-26). ⌘Q and ⌘W close
-// the window; the server goes on.
+// the window; the server goes on. ⌘R reads the page again, as a browser does, and ⌘⇧R without what was
+// kept — the window has no button for it (WebKit answers both, reload: and reloadFromOrigin:).
 void windowMenu(void) {
 	@autoreleasepool {
 		NSApplication *app = [NSApplication sharedApplication];
@@ -29,6 +30,12 @@ void windowMenu(void) {
 		[edit addItemWithTitle:@"붙여넣기" action:@selector(paste:) keyEquivalent:@"v"];
 		[edit addItemWithTitle:@"모두 선택" action:@selector(selectAll:) keyEquivalent:@"a"];
 		[editItem setSubmenu:edit];
+		NSMenuItem *viewItem = [[NSMenuItem alloc] init];
+		[bar addItem:viewItem];
+		NSMenu *viewMenu = [[NSMenu alloc] initWithTitle:@"보기"];
+		[viewMenu addItemWithTitle:@"새로고침" action:@selector(reload:) keyEquivalent:@"r"];
+		[viewMenu addItemWithTitle:@"새로 받아 새로고침" action:@selector(reloadFromOrigin:) keyEquivalent:@"R"];
+		[viewItem setSubmenu:viewMenu];
 		[app setMainMenu:bar];
 		[app activateIgnoringOtherApps:YES];
 	}
