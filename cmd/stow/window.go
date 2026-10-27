@@ -81,6 +81,24 @@ func openOutside(link string) {
 	}
 }
 
+// anotherWindow opens one more window on a page of the same server, as VS Code opens a second window:
+// a process of its own, which the menu bar does not keep — the tray's "열기" still raises its own one.
+// Only the server the window shows; anything else a page might pass is dropped.
+func anotherWindow(origin string) func(link string) {
+	return func(link string) {
+		u, err := url.Parse(link)
+		home, herr := url.Parse(origin)
+		if err != nil || herr != nil || u.Scheme != home.Scheme || u.Host != home.Host {
+			return
+		}
+		self, err := os.Executable()
+		if err != nil {
+			return
+		}
+		exec.Command(self, "--window", u.String()).Start()
+	}
+}
+
 // loading is what the window shows until the server answers — on a slow machine that takes a while, and
 // a window that does not come makes people start the app again (2026-10-17).
 const loading = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
