@@ -281,7 +281,8 @@ func main() {
 	}()
 	go runner.Run(ctx, *workers)
 	api.ScanFolders(ctx) // in the background: folders that are only read, as they are now
-	go api.WatchMembers(ctx, 15*time.Second)
+	// a removed member's session closes within a minute
+	go api.WatchMembers(ctx, time.Minute)
 	if l := api.Link(); l.Key != "" { // connected before: open the tunnel again
 		out.set(l)
 	}

@@ -399,7 +399,8 @@ func (s *Server) WatchMembers(ctx context.Context, every time.Duration) {
 	defer tick.Stop()
 	var askedTunnel time.Time
 	for {
-		if l := s.Link(); l.Key != "" && l.Frps == "" && time.Since(askedTunnel) >= time.Minute {
+		// at most once a minute; half a tick of slack so a tick of exactly a minute does not skip every other one
+		if l := s.Link(); l.Key != "" && l.Frps == "" && time.Since(askedTunnel) >= time.Minute-every/2 {
 			askedTunnel = time.Now()
 			if err := s.fetchTunnel(ctx); err != nil && !errors.Is(err, errKeyRefused) {
 				log.Printf("tunnel server: %v", err)
