@@ -24,7 +24,8 @@ func showWindow(url string) {
 	w.SetTitle("tidoly stow")
 	w.SetSize(1200, 860, webview.HintNone)
 	C.fileDialogs(w.Window())
-	w.Bind("stowOpen", openOutside) // links that leave the server: the browser, not this window
+	w.Bind("stowOpen", openOutside)          // links that leave the server: the browser, not this window
+	w.Bind("stowWindow", anotherWindow(url)) // a page of this server in one more window
 	if answers(url) {
 		w.Navigate(url)
 	} else { // the server is still coming up: say so, then go

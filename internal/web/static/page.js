@@ -82,6 +82,36 @@
       }, () => { location.href = link.href; }); // no link to be had: connect in this window, as before
   });
 
+  // A page of this server in a window of its own: in the app, one more window (stowWindow); in a browser, a
+  // new tab. ⌘-click (Ctrl-click) or a middle click on a link of this server asks it, as in a browser.
+  window.StowNewWindow = (url) => {
+    const to = new URL(url, location.href).href;
+    if (typeof window.stowWindow === "function") window.stowWindow(to);
+    else window.open(to, "_blank", "noopener");
+  };
+  const wantsWindow = (event) => event.metaKey || event.ctrlKey || event.button === 1;
+  const ownLink = (event) => {
+    const link = event.target.closest && event.target.closest("a[href]");
+    if (!link || typeof window.stowWindow !== "function") return null; // a browser does this itself
+    if (link.getAttribute("href").startsWith("#")) return null; // a page's own control, not a page to go to
+    const to = new URL(link.href, location.href);
+    return to.origin === location.origin && !link.hasAttribute("download") ? to : null;
+  };
+  document.addEventListener("click", (event) => {
+    if (!wantsWindow(event) || event.defaultPrevented) return;
+    const to = ownLink(event);
+    if (!to) return;
+    event.preventDefault();
+    window.StowNewWindow(to.href);
+  }, true);
+  document.addEventListener("auxclick", (event) => {
+    if (event.button !== 1 || event.defaultPrevented) return;
+    const to = ownLink(event);
+    if (!to) return;
+    event.preventDefault();
+    window.StowNewWindow(to.href);
+  }, true);
+
   // In the app's window (it gives the pages stowOpen), a link that leaves the server or asks for a new window
   // opens in the browser: the window has no address bar nor back button. In a browser, nothing changes.
   document.addEventListener("click", (event) => {
