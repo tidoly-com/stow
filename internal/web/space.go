@@ -14,9 +14,58 @@ import (
 // the menu is the photos' alone, as it has always been. The pages of a space are mounted by the build
 // that has them (Mount), drawn in the same frame as the photos' (AddPages, Frame, Render).
 type Space struct {
-	Name string // on the switch
-	Link string // where the switch leads
-	Menu []MenuItem
+	Name  string // on the switch
+	Link  string // where the switch leads
+	Menu  []MenuItem
+	Trash string // where 휴지통 leads from its side, "" for the photos' trash
+}
+
+// A TrashTab is one kind of thing a space keeps in the trash, as a tab over the trash beside the photos'
+// (사진 · 문서 · 메모 · 허브): one trash in the menu, the kinds side by side.
+type TrashTab struct {
+	Name, Link string
+	Count      func(context.Context, store.User) int
+}
+
+// TrashTabLine is a tab as the page draws it.
+type TrashTabLine struct {
+	Name, Link string
+	Count      int
+	Current    bool
+}
+
+// TrashTabsFor are the trash's tabs — the photos' first — with the one at current marked; none when no
+// space keeps a trash of its own.
+func (w *Web) TrashTabsFor(ctx context.Context, user store.User, current string) []TrashTabLine {
+	if len(w.TrashTabs) == 0 {
+		return nil
+	}
+	photos := 0
+	if w.Store != nil {
+		if assets, err := w.Store.TrashedAssets(ctx, user.ID, trashLimit); err == nil {
+			photos = len(assets)
+		}
+	}
+	lines := []TrashTabLine{{Name: "사진", Link: "/trash", Count: photos, Current: current == "/trash"}}
+	for _, t := range w.TrashTabs {
+		n := 0
+		if t.Count != nil {
+			n = t.Count(ctx, user)
+		}
+		lines = append(lines, TrashTabLine{Name: t.Name, Link: t.Link, Count: n, Current: t.Link == current})
+	}
+	return lines
+}
+
+// InSpace draws a page in the menu of the space named, though no line of its menu is the page's own — the
+// trash of a space, reached from its side.
+func (w *Web) InSpace(data map[string]any, name string) {
+	for i := range w.Spaces {
+		if w.Spaces[i].Name == name {
+			data["Space"] = &w.Spaces[i]
+			return
+		}
+	}
 }
 
 // MenuItem is one line of a space's menu. Icon is the address of an SVG symbol; Tab is what a page of it

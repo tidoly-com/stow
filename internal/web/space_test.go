@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -46,5 +47,40 @@ func TestASpaceBringsASwitchAndItsOwnMenu(t *testing.T) {
 	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page" title="개발"><span>개발</span></a><a href="/hubs/b" class="inner" title="#23"><span>#23</span></a><a href="/hubs/c" class="inner deeper" title="1기"><span>1기</span></a></div>`) ||
 		strings.Count(hubs, "side-sub") != 1 {
 		t.Errorf("the pieces under the open line:\n%s", hubs)
+	}
+}
+
+// A space that keeps a trash of its own: 휴지통 on its side leads there, the page is drawn in its menu, and
+// the trash shows the kinds as tabs, the photos' first.
+func TestASpacesTrashIsATabBesideThePhotos(t *testing.T) {
+	w := &Web{Edition: "Plus", Spaces: []Space{{Name: "보관함", Link: "/notes", Trash: "/docs/trash",
+		Menu: []MenuItem{{Name: "메모", Icon: "/x.svg#note", Link: "/notes", Tab: "notes"}}}},
+		TrashTabs: []TrashTab{{Name: "문서", Link: "/docs/trash", Count: func(context.Context, store.User) int { return 3 }}}}
+	draw := func(name string, data any) string {
+		var b strings.Builder
+		if err := pages.ExecuteTemplate(&b, name, data); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	notes := draw("nav", map[string]any{"Tab": "notes", "User": store.User{}, "Spaces": w.Spaces, "Space": w.space("notes")})
+	if !strings.Contains(notes, `<a href="/docs/trash">`) {
+		t.Errorf("휴지통 from the space's side:\n%s", notes)
+	}
+	photos := draw("nav", map[string]any{"Tab": "timeline", "User": store.User{}, "Spaces": w.Spaces})
+	if !strings.Contains(photos, `<a href="/trash">`) {
+		t.Errorf("휴지통 from the photos' side:\n%s", photos)
+	}
+	data := map[string]any{"Tab": "trash", "User": store.User{}, "Spaces": w.Spaces}
+	w.InSpace(data, "보관함")
+	if !strings.Contains(draw("nav", data), `<a href="/docs/trash" aria-current="page">`) {
+		t.Error("the space's trash is not drawn in its menu")
+	}
+	tabs := draw("trash-tabs", w.TrashTabsFor(context.Background(), store.User{}, "/docs/trash"))
+	if !strings.Contains(tabs, `<a href="/trash">사진 <small>0</small></a><a href="/docs/trash" aria-current="page">문서 <small>3</small></a>`) {
+		t.Errorf("tabs:\n%s", tabs)
+	}
+	if (&Web{}).TrashTabsFor(context.Background(), store.User{}, "/trash") != nil {
+		t.Error("tabs without a space's trash")
 	}
 }

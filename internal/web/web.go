@@ -101,6 +101,8 @@ type Web struct {
 	// the routes those pages answer on
 	Edition string
 	Spaces  []Space
+	// TrashTabs are the kinds a space keeps in the trash, shown as tabs beside the photos' (TrashTab)
+	TrashTabs []TrashTab
 	Mount   []func(m *http.ServeMux)
 	mux     *http.ServeMux
 }
@@ -918,6 +920,7 @@ func (w *Web) trash(rw http.ResponseWriter, r *http.Request, user store.User) {
 	}
 	data := w.frame(r.Context(), user, "휴지통", "trash")
 	data["Groups"], data["Count"], data["Days"], data["Bar"] = groups, len(assets), w.Days, "trash"
+	data["TrashTabs"] = w.TrashTabsFor(r.Context(), user, "/trash")
 	w.render(rw, "trash", data)
 }
 
