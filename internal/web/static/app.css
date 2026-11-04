@@ -185,6 +185,8 @@ body.dropping::after { content: "여기에 놓으면 올립니다"; position: fi
 .tabs a { padding: 6px 16px; border-radius: var(--pill); color: var(--muted-foreground); font-size: .9375rem; font-weight: 500; }
 .tabs a:hover { background: var(--muted); }
 .tabs a[aria-current] { background: var(--accent); color: var(--accent-foreground); font-weight: 600; }
+.trash-tabs { margin-bottom: 8px; }
+.trash-tabs small { margin-left: 2px; font-weight: 400; color: var(--muted-foreground); }
 
 /* photos in rows that fill the width; each keeps its shape (the script sets every cell's size) */
 .day h3 { display: flex; align-items: center; gap: 8px; height: 44px; margin-top: 12px; }

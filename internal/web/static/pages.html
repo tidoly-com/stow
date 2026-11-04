@@ -39,7 +39,7 @@
 <a href="/people"{{if eq .Tab "people"}} aria-current="page"{{end}}>{{template "i" "people"}}인물</a>
 <a href="/places"{{if eq .Tab "places"}} aria-current="page"{{end}}>{{template "i" "place"}}장소</a>
 <a href="/albums"{{if eq .Tab "albums"}} aria-current="page"{{end}}>{{template "i" "album"}}앨범</a>
-{{end}}<a href="/trash"{{if eq .Tab "trash"}} aria-current="page"{{end}}>{{template "i" "trash"}}휴지통</a>
+{{end}}<a href="{{with .Space}}{{or .Trash "/trash"}}{{else}}/trash{{end}}"{{if eq .Tab "trash"}} aria-current="page"{{end}}>{{template "i" "trash"}}휴지통</a>
 {{if .User.IsAdmin}}<a href="/admin"{{if eq .Tab "admin"}} aria-current="page"{{end}}>{{template "i" "admin"}}관리</a>{{end}}
 <div class="side-foot">
 <a class="small" href="/licenses"{{if eq .Tab "licenses"}} aria-current="page"{{end}}>오픈소스 라이선스 · AGPL-3.0</a>
@@ -437,8 +437,11 @@ addEventListener("load", () => {
 {{range .Months}}<section data-month="{{.Key}}" data-count="{{.Count}}" aria-label="{{.Label}}"><div class="days"></div></section>{{end}}
 </main>{{if .Months}}<div class="years" aria-label="연도"></div>{{end}}{{template "foot" .}}{{end}}
 
+{{define "trash-tabs"}}{{with .}}<div class="tabs trash-tabs" role="tablist" aria-label="휴지통의 종류">{{range .}}<a href="{{.Link}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}} <small>{{.Count}}</small></a>{{end}}</div>{{end}}{{end}}
+
 {{define "trash"}}{{template "head" .}}{{template "nav" .}}<main class="trash">
 <h1>휴지통 <small>{{.Count}}</small></h1>
+{{template "trash-tabs" .TrashTabs}}
 <p class="dim">지운 사진은 여기에 {{.Days}}일 동안 있다가 <b>완전히 지워집니다</b>. 그 전에는 언제든 복원할 수 있고, 그동안 파일은 디스크에 그대로 있습니다. 등록한 기존 사진 폴더의 사진은 완전히 지워도 원본 파일이 그 폴더에 남고, tidoly stow 에서만 빠집니다.</p>
 {{if not .Groups}}<p class="empty">휴지통이 비어 있습니다.</p>{{else}}
 <form class="tools" method="post" action="/trash"><button class="button quiet">모두 복원</button> <button class="button quiet danger" name="empty" value="1" data-confirm="휴지통의 사진을 모두 완전히 지울까요? 되돌릴 수 없습니다.">휴지통 비우기</button></form>
