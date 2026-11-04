@@ -33,7 +33,7 @@
 <nav class="side">
 {{with .Spaces}}<div class="spaces" role="group" aria-label="공간"><a href="/"{{if not $.Space}} aria-current="page"{{end}}>사진</a>{{range .}}<a href="{{.Link}}"{{if and $.Space (eq .Name $.Space.Name)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>{{end}}
 {{with .Space}}{{range .Menu}}<a href="{{.Link}}"{{if eq .Tab $.Tab}} aria-current="page"{{end}}><svg class="i" aria-hidden="true"><use href="{{.Icon}}"/></svg>{{.Name}}</a>
-{{if and (eq .Tab $.Tab) $.SideSub}}<div class="side-sub">{{range $.SideSub}}<a href="{{.Link}}"{{if .Inner}} class="inner"{{end}}{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>
+{{if and (eq .Tab $.Tab) $.SideSub}}<div class="side-sub">{{range $.SideSub}}<a href="{{.Link}}"{{if .Inner}} class="inner"{{end}}{{if .Current}} aria-current="page"{{end}} title="{{.Name}}"><span>{{.Name}}</span></a>{{end}}</div>
 {{end}}{{end}}{{else}}<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
 <a href="/?show=videos"{{if eq .Tab "videos"}} aria-current="page"{{end}}>{{template "i" "video"}}동영상</a>
 <a href="/people"{{if eq .Tab "people"}} aria-current="page"{{end}}>{{template "i" "people"}}인물</a>
