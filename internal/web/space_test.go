@@ -38,12 +38,12 @@ func TestASpaceBringsASwitchAndItsOwnMenu(t *testing.T) {
 	// a page of the space may put the pieces of what is open under its line
 	w.Spaces[0].Menu = append(w.Spaces[0].Menu, MenuItem{Name: "허브", Icon: "/x.svg#hub", Link: "/hubs", Tab: "hubs"})
 	data := map[string]any{"Tab": "hubs", "User": store.User{}, "Edition": w.Edition, "Spaces": w.Spaces, "Space": w.space("hubs"),
-		"SideSub": []SubItem{{Name: "개발", Link: "/hubs/a", Current: true}, {Name: "#23", Link: "/hubs/b", Inner: true}}}
+		"SideSub": []SubItem{{Name: "개발", Link: "/hubs/a", Current: true}, {Name: "#23", Link: "/hubs/b", Inner: true}, {Name: "1기", Link: "/hubs/c", Inner: true, Deeper: true}}}
 	var b strings.Builder
 	if err := pages.ExecuteTemplate(&b, "nav", data); err != nil {
 		t.Fatal(err)
 	}
-	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page" title="개발"><span>개발</span></a><a href="/hubs/b" class="inner" title="#23"><span>#23</span></a></div>`) ||
+	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page" title="개발"><span>개발</span></a><a href="/hubs/b" class="inner" title="#23"><span>#23</span></a><a href="/hubs/c" class="inner deeper" title="1기"><span>1기</span></a></div>`) ||
 		strings.Count(hubs, "side-sub") != 1 {
 		t.Errorf("the pieces under the open line:\n%s", hubs)
 	}
