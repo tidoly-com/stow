@@ -43,7 +43,7 @@ func TestASpaceBringsASwitchAndItsOwnMenu(t *testing.T) {
 	if err := pages.ExecuteTemplate(&b, "nav", data); err != nil {
 		t.Fatal(err)
 	}
-	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page">개발</a><a href="/hubs/b" class="inner">#23</a></div>`) ||
+	if hubs := b.String(); !strings.Contains(hubs, `<div class="side-sub"><a href="/hubs/a" aria-current="page" title="개발"><span>개발</span></a><a href="/hubs/b" class="inner" title="#23"><span>#23</span></a></div>`) ||
 		strings.Count(hubs, "side-sub") != 1 {
 		t.Errorf("the pieces under the open line:\n%s", hubs)
 	}
