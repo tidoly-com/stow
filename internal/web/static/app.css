@@ -155,6 +155,7 @@ th { color: var(--muted-foreground); font-weight: 500; }
 .side-sub { display: flex; flex-direction: column; margin: 2px 0 6px 30px; border-left: 1px solid var(--border); }
 .side .side-sub a { height: 34px; padding: 0 12px; font-size: .875rem; font-weight: 400; color: var(--muted-foreground); }
 .side .side-sub a.inner { padding-left: 24px; }
+.side .side-sub a.deeper { padding-left: 36px; }
 .side .side-sub a[aria-current] { color: var(--foreground); font-weight: 600; }
 .side .side-sub a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* with a second set of pages: a switch between it and the photos, above the menu of the side one is on */
