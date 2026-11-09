@@ -54,10 +54,17 @@ var extensions []func(pages *web.Web, dataDir, hidden string) error
 // Immich app, runs no photo work, and its first extension's pages are all there is.
 var alone bool
 
+// defaultListen and defaultUpdateURL are this build's port and where its releases are; a build of another
+// program (Plus, #47) puts its own, in init, so that both can run on one PC and neither takes the other's.
+var (
+	defaultListen    = "127.0.0.1:30891"
+	defaultUpdateURL = "https://github.com/tidoly-com/stow/releases/latest/download"
+)
+
 func main() {
 	dataDir := flag.String("data", "data", "folder for the photos and the database")
 	configFile := flag.String("config", "", "settings file written by the setup (stow issue #18); without a folder in it, the setup is shown in the browser instead of the photos")
-	listen := flag.String("listen", "127.0.0.1:30891", "address to listen on; 30891 is stow's port everywhere, inside the range a Kubernetes NodePort can take")
+	listen := flag.String("listen", defaultListen, "address to listen on; 30891 is stow's port everywhere, inside the range a Kubernetes NodePort can take")
 	publicURL := flag.String("public-url", "", "how phones reach this server at home (default: http://<listen>)")
 	homeURL := flag.String("home-url", "https://www.tidoly.com", "tidoly-home, as a phone's browser reaches it")
 	homeKey := flag.String("home-key", homeTicketKey, "tidoly-home's ticket public key, base64url")
@@ -70,7 +77,7 @@ func main() {
 	faceThreshold := flag.Float64("face-threshold", 0.363, "how alike two faces must be to count as one person (0 to 1)")
 	name := flag.String("name", "", "what this server is called on the other devices in the house (default: this computer's name)")
 	inspect := flag.String("inspect", "", "print what this program reads from one photo or video, then exit")
-	updateURL := flag.String("update-url", "https://github.com/tidoly-com/stow/releases/latest/download", "where releases are downloaded from: latest.json, the app, SHA256SUMS")
+	updateURL := flag.String("update-url", defaultUpdateURL, "where releases are downloaded from: latest.json, the app, SHA256SUMS; \"\" looks for none")
 	ownerPassword := flag.Bool("owner-password", false, "ask on this terminal for a new password for the server's owner, set it, and exit — for a server with no browser of its own (\"sudo tidoly-stow password\")")
 	resetOwner := flag.Bool("reset-owner", false, "print a link, good once for 10 minutes and only in a browser on this PC, that sets the owner's password again; then exit")
 	flag.Parse()
