@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tidoly-com/stow/internal/account"
 	"github.com/tidoly-com/stow/internal/certs"
 	"github.com/tidoly-com/stow/internal/coupons"
 	"github.com/tidoly-com/stow/internal/disk"
@@ -48,6 +49,10 @@ import (
 // extensions add pages beside the photos, given the web pages, the data folder and its hidden folder. This
 // repository has none; a build with more puts its own in from a file of its own, in init.
 var extensions []func(pages *web.Web, dataDir, hidden string) error
+
+// alone is set, in init, by a build that has no photos (#47): it stands on the accounts alone, answers no
+// Immich app, runs no photo work, and its first extension's pages are all there is.
+var alone bool
 
 func main() {
 	dataDir := flag.String("data", "data", "folder for the photos and the database")
@@ -149,27 +154,6 @@ func main() {
 	defer stop()
 	stopWithParent(stop)
 
-	// The face helper: ready now, or — ours, whose model is fetched on first start — once the model is here.
-	var helper, helperLater *faces.Helper
-	sface := sfaceModel(hidden)
-	if fields := command(*faceHelper); len(fields) == 1 && strings.HasPrefix(filepath.Base(fields[0]), "stow-faces") {
-		h := faces.New([]string{fields[0], "-models", filepath.Dir(sface.Path)})
-		defer h.Close()
-		if exists(sface.Path) {
-			helper = h
-		} else {
-			helperLater = h
-		}
-	} else if len(fields) > 0 {
-		helper = faces.New(fields)
-		defer helper.Close()
-	}
-	var couponHelp *coupons.Helper
-	if fields := command(*couponHelper); len(fields) > 0 {
-		couponHelp = coupons.New(fields)
-		defer couponHelp.Close()
-	}
-	runner := jobs.NewRunner(st)
 	_, port, _ := net.SplitHostPort(*listen)
 	localPort, _ := strconv.Atoi(port)
 	// https outside ends here, with this PC's own certificate, on a port of its own that only the tunnel uses
@@ -181,120 +165,168 @@ func main() {
 	defer tun.Close()
 	keeper := &certs.Keeper{Dir: filepath.Join(hidden, "tls"), Poll: 10 * time.Second, Retry: time.Hour}
 	out := &outsideLink{ctx: ctx, tun: tun, keeper: keeper}
-	api := immich.New(immich.Config{
-		Faces: helper, FaceThreshold: *faceThreshold, Coupons: couponHelp,
-		Name: serverName(*name), PublicURL: *publicURL, HomeURL: *homeURL, HomeKey: key, Link: immich.Link{Slug: *slug},
-		Linked:   out.set,
-		HTTPS:    keeper.Have,
-		JobKinds: []string{"metadata", "thumbnail"},
-		Thumbs:   &thumbs.Maker{Dir: filepath.Join(hidden, "derived"), FFmpeg: findFFmpeg(*ffmpeg)},
-	}, st, lib, runner)
+
+	// Who comes in stands under every build; the photo server only where there are photos (#47).
+	var (
+		api    *immich.Server
+		acc    *account.Accounts
+		root   http.Handler
+		runner *jobs.Runner
+	)
+	var helper, helperLater *faces.Helper
+	sface := sfaceModel(hidden)
+	if alone {
+		acc = account.New(account.Config{PublicURL: *publicURL, HomeURL: *homeURL, HomeKey: key, Link: account.Link{Slug: *slug},
+			Linked: out.set, HTTPS: keeper.Have}, st)
+		root = newAloneServer(acc)
+	} else {
+		// The face helper: ready now, or — ours, whose model is fetched on first start — once the model is here.
+		if fields := command(*faceHelper); len(fields) == 1 && strings.HasPrefix(filepath.Base(fields[0]), "stow-faces") {
+			h := faces.New([]string{fields[0], "-models", filepath.Dir(sface.Path)})
+			defer h.Close()
+			if exists(sface.Path) {
+				helper = h
+			} else {
+				helperLater = h
+			}
+		} else if len(fields) > 0 {
+			helper = faces.New(fields)
+			defer helper.Close()
+		}
+		var couponHelp *coupons.Helper
+		if fields := command(*couponHelper); len(fields) > 0 {
+			couponHelp = coupons.New(fields)
+			defer couponHelp.Close()
+		}
+		runner = jobs.NewRunner(st)
+		api = immich.New(immich.Config{
+			Faces: helper, FaceThreshold: *faceThreshold, Coupons: couponHelp,
+			Name: serverName(*name), PublicURL: *publicURL, HomeURL: *homeURL, HomeKey: key, Link: immich.Link{Slug: *slug},
+			Linked:   out.set,
+			HTTPS:    keeper.Have,
+			JobKinds: []string{"metadata", "thumbnail"},
+			Thumbs:   &thumbs.Maker{Dir: filepath.Join(hidden, "derived"), FFmpeg: findFFmpeg(*ffmpeg)},
+		}, st, lib, runner)
+		acc, root = api.Accounts, api
+	}
 	updates := &update.Checker{Current: version, Base: *updateURL}
 	// WireGuard from anywhere, on the same port number over UDP: off until the owner switches it on
-	vpnSet := &vpn.Manager{VPN: &vpn.VPN{Port: localPort, Handler: api}, Settings: st, Outside: vpn.PublicAddress}
+	vpnSet := &vpn.Manager{VPN: &vpn.VPN{Port: localPort, Handler: root}, Settings: st, Outside: vpn.PublicAddress}
 	defer vpnSet.VPN.Close()
-	keeper.Home = api.CallHome
-	keeper.Ready = func() { out.set(api.Link()) } // the tunnel takes https now
-	tun.Waiting = api.TunnelWaiting               // the week's new tunnels taken: its place in tidoly's line
+	keeper.Home = acc.CallHome
+	keeper.Ready = func() { out.set(acc.Link()) } // the tunnel takes https now
+	tun.Waiting = acc.TunnelWaiting               // the week's new tunnels taken: its place in tidoly's line
 
-	if err := api.LoadLocations(ctx); err != nil {
-		log.Fatalf("storage: %v", err)
+	pages := &web.Web{Store: st, User: acc.SessionUser, Address: *publicURL, Alone: alone,
+		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates,
+		NeedsOwner: acc.NeedsOwner, LocalLogin: acc.WebLocalLogin, AddUser: acc.AddLocalUser, SetPassword: acc.SetLocalPassword, ChangePassword: acc.ChangeOwnPassword,
+		TidolyHere: acc.TidolyHere, Outside: outside(acc, tun, keeper), Connect: acc.ConnectStart, ConnectBack: acc.ConnectBack, Disconnect: acc.Disconnect,
+		SetAutoAdd: acc.SetAutoAdd, Block: acc.Block, Arrivals: acc.Arrivals, SeenArrivals: acc.SeenArrivals,
+		Contact: *homeURL + "/contact"}
+	if !alone {
+		if err := api.LoadLocations(ctx); err != nil {
+			log.Fatalf("storage: %v", err)
+		}
+		pages.FacesState, pages.SetFaces, pages.CouponDays, pages.SetCoupons = api.FacesState, api.SetFaces, api.CouponDays(), api.SetCoupons
+		pages.ScreenshotsOn, pages.SetScreenshots, pages.Changed, pages.Events = api.ScreenshotsOn, api.SetScreenshots, api.Changed, api.WebEvents
+		pages.LocationDir, pages.AddLocation = api.LocationDir, api.AddLocation
+		pages.Links = web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashPassword}
+		pages.AddFolder, pages.PauseFolder, pages.ScanFolder, pages.RemoveFolder, pages.FolderState = api.AddFolder, api.PauseFolder, api.ScanFolder, api.RemoveFolder, folderState(api)
+		pages.Trash, pages.Restore, pages.Empty, pages.Days = api.Trash, api.Restore, api.EmptyTrash, immich.TrashDays
 	}
-	pages := &web.Web{Store: st, User: api.SessionUser, Address: *publicURL, FacesState: api.FacesState, SetFaces: api.SetFaces, CouponDays: api.CouponDays(), SetCoupons: api.SetCoupons, ScreenshotsOn: api.ScreenshotsOn, SetScreenshots: api.SetScreenshots, Changed: api.Changed, Events: api.WebEvents,
-		Dir: *dataDir, ResetFile: filepath.Join(hidden, ownerResetFile), Licenses: licenseFolder(), Version: version, VPN: vpnSet, Update: updates, LocationDir: api.LocationDir, AddLocation: api.AddLocation,
-		NeedsOwner: api.NeedsOwner, LocalLogin: api.WebLocalLogin, AddUser: api.AddLocalUser, SetPassword: api.SetLocalPassword, ChangePassword: api.ChangeOwnPassword,
-		TidolyHere: api.TidolyHere,
-		Links:      web.LinkFuncs{On: api.LinksOn, Open: api.OpenLink, Unlock: api.UnlockLink, New: api.NewSharedLink, Address: api.LinkAddress, Hash: immich.HashPassword}, Outside: outside(api, tun, keeper), Connect: api.ConnectStart, ConnectBack: api.ConnectBack, Disconnect: api.Disconnect,
-		SetAutoAdd: api.SetAutoAdd, Block: api.Block, Arrivals: api.Arrivals, SeenArrivals: api.SeenArrivals,
-		Contact:   *homeURL + "/contact",
-		AddFolder: api.AddFolder, PauseFolder: api.PauseFolder, ScanFolder: api.ScanFolder, RemoveFolder: api.RemoveFolder, FolderState: folderState(api), Trash: api.Trash, Restore: api.Restore, Empty: api.EmptyTrash, Days: immich.TrashDays}
 	for _, add := range extensions {
 		if err := add(pages, *dataDir, hidden); err != nil {
 			log.Fatalf("extension: %v", err)
 		}
 	}
-	api.Pages(pages.Handler(api.WebLoginStart, api.WebLogout))
-	runner.Handle("metadata", api.ReadMetadata)
-	runner.Handle("place", api.NamePlace)
-	runner.Handle("thumbnail", api.MakeThumbnail)
-	runner.Handle(store.AskedKind, api.MakeFull)
-	if helper != nil || helperLater != nil {
-		runner.Handle("face", api.FindFaces)
-	}
-	if helper != nil {
-		if n, err := api.QueueMissingFaces(ctx); err != nil {
-			log.Printf("faces: %v", err)
-		} else if n > 0 {
-			log.Printf("faces: %d photos not looked at yet, queued", n)
+	if alone {
+		root.(*aloneServer).mux.Handle("/", pages.Handler(acc.WebLoginStart, acc.WebLogout))
+	} else {
+		api.Pages(pages.Handler(acc.WebLoginStart, acc.WebLogout))
+		runner.Handle("metadata", api.ReadMetadata)
+		runner.Handle("place", api.NamePlace)
+		runner.Handle("thumbnail", api.MakeThumbnail)
+		runner.Handle(store.AskedKind, api.MakeFull)
+		if helper != nil || helperLater != nil {
+			runner.Handle("face", api.FindFaces)
 		}
-	}
-	if helperLater != nil {
-		api.WaitForFaces()
-		go fetchFaceModel(ctx, sface, func() {
-			if err := api.EnableFaces(ctx, helperLater); err != nil {
+		if helper != nil {
+			if n, err := api.QueueMissingFaces(ctx); err != nil {
 				log.Printf("faces: %v", err)
+			} else if n > 0 {
+				log.Printf("faces: %d photos not looked at yet, queued", n)
 			}
-			runner.Wake()
-		})
-	}
-	runner.Handle("coupon", api.FindCoupon)
-	if n, err := api.QueueMissingCoupons(ctx); err != nil {
-		log.Printf("coupons: %v", err)
-	} else if n > 0 {
-		log.Printf("coupons: %d pictures not looked at yet, queued", n)
-	}
-	go func() { // photos read before a face repeated in one photo was taken as one
-		if n, err := api.LookAgainAtRepeats(ctx); err != nil {
-			log.Printf("faces: %v", err)
-		} else if n > 0 {
-			log.Printf("faces: %d photos with the same face more than once, looked at again", n)
 		}
-	}()
-	go func() { // pictures read before screenshots were gathered, or while it was switched off
-		if n, err := api.FileScreenshots(ctx); err != nil {
-			log.Printf("screenshots: %v", err)
-		} else if n > 0 {
-			log.Printf("screenshots: %d put in the album", n)
+		if helperLater != nil {
+			api.WaitForFaces()
+			go fetchFaceModel(ctx, sface, func() {
+				if err := api.EnableFaces(ctx, helperLater); err != nil {
+					log.Printf("faces: %v", err)
+				}
+				runner.Wake()
+			})
 		}
-	}()
-	if n, err := api.QueueUndated(ctx); err != nil {
-		log.Printf("undated photos: %v", err)
-	} else if n > 0 {
-		log.Printf("undated photos: %d whose day can now be told, read again", n)
-	}
-	if n, err := api.QueueMissingThumbnails(ctx); err != nil {
-		log.Printf("thumbnails: %v", err)
-	} else if n > 0 {
-		log.Printf("thumbnails: %d photos without small pictures, queued", n)
-	}
-	if n, err := st.QueueMissingPlaces(ctx); err != nil {
-		log.Printf("places: %v", err)
-	} else if n > 0 {
-		log.Printf("places: %d photos with coordinates and no place name yet, queued", n)
-	}
-	go func() { // in the background: a large library must not keep the server from coming up
-		if n, err := api.PairLivePhotos(ctx); err != nil {
-			log.Printf("live photos: %v", err)
+		runner.Handle("coupon", api.FindCoupon)
+		if n, err := api.QueueMissingCoupons(ctx); err != nil {
+			log.Printf("coupons: %v", err)
 		} else if n > 0 {
-			log.Printf("live photos: %d short videos put together with their photos", n)
+			log.Printf("coupons: %d pictures not looked at yet, queued", n)
 		}
-	}()
-	go runner.Run(ctx, *workers)
-	api.ScanFolders(ctx) // in the background: folders that are only read, as they are now
+		go func() { // photos read before a face repeated in one photo was taken as one
+			if n, err := api.LookAgainAtRepeats(ctx); err != nil {
+				log.Printf("faces: %v", err)
+			} else if n > 0 {
+				log.Printf("faces: %d photos with the same face more than once, looked at again", n)
+			}
+		}()
+		go func() { // pictures read before screenshots were gathered, or while it was switched off
+			if n, err := api.FileScreenshots(ctx); err != nil {
+				log.Printf("screenshots: %v", err)
+			} else if n > 0 {
+				log.Printf("screenshots: %d put in the album", n)
+			}
+		}()
+		if n, err := api.QueueUndated(ctx); err != nil {
+			log.Printf("undated photos: %v", err)
+		} else if n > 0 {
+			log.Printf("undated photos: %d whose day can now be told, read again", n)
+		}
+		if n, err := api.QueueMissingThumbnails(ctx); err != nil {
+			log.Printf("thumbnails: %v", err)
+		} else if n > 0 {
+			log.Printf("thumbnails: %d photos without small pictures, queued", n)
+		}
+		if n, err := st.QueueMissingPlaces(ctx); err != nil {
+			log.Printf("places: %v", err)
+		} else if n > 0 {
+			log.Printf("places: %d photos with coordinates and no place name yet, queued", n)
+		}
+		go func() { // in the background: a large library must not keep the server from coming up
+			if n, err := api.PairLivePhotos(ctx); err != nil {
+				log.Printf("live photos: %v", err)
+			} else if n > 0 {
+				log.Printf("live photos: %d short videos put together with their photos", n)
+			}
+		}()
+		go runner.Run(ctx, *workers)
+		api.ScanFolders(ctx) // in the background: folders that are only read, as they are now
+	}
 	// a removed member's session closes within a minute
-	go api.WatchMembers(ctx, time.Minute)
-	if l := api.Link(); l.Key != "" { // connected before: open the tunnel again
+	go acc.WatchMembers(ctx, time.Minute)
+	if l := acc.Link(); l.Key != "" { // connected before: open the tunnel again
 		out.set(l)
 	}
 	if err := vpnSet.Start(ctx); err != nil {
 		log.Printf("vpn: %v", err)
 	}
 	go updates.Run(ctx)
-	go api.PurgeTrash(ctx)
-	go api.Remember(ctx)
+	if !alone {
+		go api.PurgeTrash(ctx)
+		go api.Remember(ctx)
+	}
 
-	srv := &http.Server{Addr: *listen, Handler: api, ReadHeaderTimeout: 10 * time.Second}
-	secure := &http.Server{Handler: api, ReadHeaderTimeout: 10 * time.Second,
+	srv := &http.Server{Addr: *listen, Handler: root, ReadHeaderTimeout: 10 * time.Second}
+	secure := &http.Server{Handler: root, ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{GetCertificate: keeper.Certificate, MinVersion: tls.VersionTLS12}}
 	go func() {
 		if err := secure.ServeTLS(tlsListener, "", ""); !errors.Is(err, http.ErrServerClosed) {
@@ -308,12 +340,12 @@ func main() {
 		srv.Shutdown(shutdown)
 		secure.Shutdown(shutdown)
 	}()
-	if l := api.Link(); l.Slug != "" {
+	if l := acc.Link(); l.Slug != "" {
 		log.Printf("tidoly-light on %s (phones at home: %s, connected to tidoly as %q), data in %s", *listen, *publicURL, l.Slug, *dataDir)
 	} else {
 		log.Printf("tidoly-light on %s (phones at home: %s, not connected to tidoly), data in %s", *listen, *publicURL, *dataDir)
 	}
-	if port, open := openPort(*listen); open {
+	if port, open := openPort(*listen); open && !alone {
 		// so that a PC set up only to look at the photos finds this one (internal/nearby)
 		if stop, err := nearby.Announce(serverName(*name), port); err != nil {
 			log.Printf("not announced on the home network: %v", err)
@@ -523,7 +555,7 @@ type outsideLink struct {
 	cancel context.CancelFunc
 }
 
-func (o *outsideLink) set(l immich.Link) {
+func (o *outsideLink) set(l account.Link) {
 	o.tun.Set(l.Slug, l.Key, l.Frps, o.keeper.Have(l.Host))
 	host := l.Host
 	if l.Key == "" {
@@ -548,7 +580,7 @@ func (o *outsideLink) set(l immich.Link) {
 }
 
 // outside tells the admin page how this server is reached from outside.
-func outside(api *immich.Server, tun *tunnel.Tunnel, keeper *certs.Keeper) func(context.Context) web.Outside {
+func outside(api *account.Accounts, tun *tunnel.Tunnel, keeper *certs.Keeper) func(context.Context) web.Outside {
 	return func(ctx context.Context) web.Outside {
 		host := api.Link().Host
 		return web.Outside{Host: host, Tunnel: tun.State(), Problem: api.LinkProblem(), AutoAdd: api.AutoAdd(ctx), Cert: keeper.State(), HTTPS: keeper.Have(host),
@@ -609,5 +641,53 @@ func folderState(api *immich.Server) func(string) (web.FolderState, bool) {
 		failure, _ := scan.Failure.Load().(string)
 		return web.FolderState{Running: scan.Running.Load(), Seen: scan.Seen.Load(), Added: scan.Added.Load(), Same: scan.Same.Load(), Gone: scan.Gone.Load(),
 			Total: scan.Total.Load(), Counted: scan.Counted.Load(), Failure: failure}, true
+	}
+}
+
+// aloneServer answers a build without photos: its pages, and the end of a browser's login with tidoly,
+// which home sends to the address the phone app's login uses.
+type aloneServer struct {
+	acc *account.Accounts
+	mux *http.ServeMux
+}
+
+func newAloneServer(acc *account.Accounts) *aloneServer {
+	a := &aloneServer{acc: acc, mux: http.NewServeMux()}
+	a.mux.HandleFunc("GET /api/oauth/mobile-redirect", func(w http.ResponseWriter, r *http.Request) {
+		if !acc.FinishWebLogin(w, r) {
+			http.NotFound(w, r)
+		}
+	})
+	a.mux.HandleFunc("/api/", http.NotFound)
+	return a
+}
+
+// ServeHTTP logs one line per request, as the photo server does — never the query — and sends plain http
+// that came through the tunnel to https.
+func (a *aloneServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	rec := &statusRecorder{ResponseWriter: w, status: 200}
+	if !a.acc.ToHTTPS(rec, r) {
+		a.mux.ServeHTTP(rec, r)
+	}
+	log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// Unwrap lets what lies under — a stream of events, a file served — reach the connection.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
 	}
 }

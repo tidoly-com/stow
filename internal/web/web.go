@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -101,10 +102,13 @@ type Web struct {
 	// the routes those pages answer on
 	Edition string
 	Spaces  []Space
+	// Alone: the build has no photos (#47) — its first space is all there is: no switch, no photo pages, and
+	// the first steps skip the photos'
+	Alone bool
 	// TrashTabs are the kinds a space keeps in the trash, shown as tabs beside the photos' (TrashTab)
 	TrashTabs []TrashTab
-	Mount   []func(m *http.ServeMux)
-	mux     *http.ServeMux
+	Mount     []func(m *http.ServeMux)
+	mux       *http.ServeMux
 }
 
 const trashLimit = 2000 // photos shown in the trash
@@ -284,9 +288,11 @@ func (w *Web) frame(ctx context.Context, user store.User, title, tab string) map
 		me = user.Email
 	}
 	data := map[string]any{"Title": title, "Tab": tab, "User": user, "Me": initial(me), "Version": w.Version, "LinksOn": w.linksOn()}
-	data["Edition"], data["Spaces"] = w.Edition, w.Spaces
+	data["Edition"], data["Spaces"], data["Alone"] = w.Edition, w.Spaces, w.Alone
 	if s := w.space(tab); s != nil {
 		data["Space"] = s
+	} else if w.Alone && len(w.Spaces) > 0 { // the admin page, the help: in the one menu there is
+		data["Space"] = &w.Spaces[0]
 	}
 	dir := w.Dir // the disk shown is the one this person's next photo goes to
 	if id, err := w.Store.LocationFor(ctx, user.ID); err == nil && id != "" && w.LocationDir != nil && w.LocationDir(id) != "" {
@@ -326,59 +332,32 @@ func (w *Web) Handler(loginStart, logout http.HandlerFunc) http.Handler {
 	m.Handle("GET /licenses/files/", w.licenseFiles())
 	m.HandleFunc("POST /owner/reset", w.ownerReset)
 	m.HandleFunc("GET /start/screen", w.page(w.startScreen))
-	m.HandleFunc("GET /start/folders", w.page(w.startFolders))
-	m.HandleFunc("GET /start/auto", w.page(w.startAuto))
+	m.HandleFunc("GET /start/space", w.page(w.startSpace))
 	m.HandleFunc("GET /outside", w.page(w.outside))
 	m.HandleFunc("GET /welcome", w.page(w.welcome))
 	m.HandleFunc("GET /help", w.page(w.help))
 	m.HandleFunc("GET /me/password", w.page(w.ownPassword))
 	m.HandleFunc("POST /me/password", w.page(w.ownPassword))
 	m.HandleFunc("GET /welcome/qr.png", w.page(w.welcomeQR))
-	m.HandleFunc("GET /phone", w.phone)
 	m.HandleFunc("POST /setup", w.setup)
 	m.HandleFunc("POST /admin/users", w.page(w.adminUsers))
 	m.HandleFunc("POST /admin/users/password", w.page(w.adminUsers))
 	m.HandleFunc("GET /auth/start", loginStart)
 	m.HandleFunc("POST /logout", logout)
-	m.HandleFunc("GET /{$}", w.page(w.timeline))
-	m.HandleFunc("GET /share/{key}", w.sharePage)
-	m.HandleFunc("POST /share/{key}", w.sharePage)
-	m.HandleFunc("GET /share/{key}/{id}", w.sharePhoto)
-	m.HandleFunc("POST /web/links", w.page(w.linkMake))
-	m.HandleFunc("GET /links", w.page(w.linksPage))
-	m.HandleFunc("POST /links/{id}", w.page(w.linkChange))
-	m.HandleFunc("POST /links/{id}/delete", w.page(w.linkChange))
-	m.HandleFunc("GET /web/month/{month}", w.page(w.month))
-	m.HandleFunc("GET /web/events", w.page(w.events))
-	m.HandleFunc("GET /web/photo/{id}", w.page(w.photo))
-	m.HandleFunc("POST /web/photos/delete", w.page(w.remove))
-	m.HandleFunc("POST /web/photos/restore", w.page(w.restore))
-	m.HandleFunc("POST /web/photos/favorite", w.page(w.favorite))
-	m.HandleFunc("POST /web/photos/share", w.page(w.share))
-	m.HandleFunc("GET /web/albums", w.page(w.albumPicker))
-	m.HandleFunc("POST /web/album", w.page(w.albumChange))
-	m.HandleFunc("POST /albums", w.page(w.albumCreate))
-	m.HandleFunc("GET /trash", w.page(w.trash))
-	m.HandleFunc("POST /trash", w.page(w.trashAct))
-	m.HandleFunc("GET /places", w.page(w.places))
-	m.HandleFunc("GET /people", w.page(w.people))
-	m.HandleFunc("GET /people/{id}", w.page(w.person))
-	m.HandleFunc("POST /people/{id}/hide", w.page(w.hide))
-	m.HandleFunc("POST /people/{id}/name", w.page(w.name))
-	m.HandleFunc("GET /albums", w.page(w.albums))
-	m.HandleFunc("GET /albums/{id}", w.page(w.album))
-	m.HandleFunc("GET /status", w.page(w.status))
+	if w.Alone {
+		m.HandleFunc("GET /{$}", func(rw http.ResponseWriter, r *http.Request) {
+			http.Redirect(rw, r, w.Spaces[0].Link, http.StatusSeeOther)
+		})
+		if t := w.Spaces[0].Trash; t != "" {
+			m.HandleFunc("GET /trash", func(rw http.ResponseWriter, r *http.Request) { http.Redirect(rw, r, t, http.StatusSeeOther) })
+		}
+	} else {
+		w.photoRoutes(m)
+	}
 	m.HandleFunc("GET /admin", w.page(w.admin))
 	m.HandleFunc("GET /admin/folders", w.page(w.adminFolders))
 	m.HandleFunc("POST /admin/locations", w.page(w.adminAddLocation))
 	m.HandleFunc("POST /admin/location", w.page(w.adminSetLocation))
-	m.HandleFunc("POST /admin/import", w.page(w.adminImport))
-	m.HandleFunc("POST /admin/import/scan", w.page(w.adminImportAct))
-	m.HandleFunc("POST /admin/import/remove", w.page(w.adminImportAct))
-	m.HandleFunc("POST /admin/import/pause", w.page(w.adminImportAct))
-	m.HandleFunc("POST /admin/coupons", w.page(w.adminCoupons))
-	m.HandleFunc("POST /admin/screenshots", w.page(w.adminScreenshots))
-	m.HandleFunc("POST /admin/faces", w.page(w.adminFaces))
 	m.HandleFunc("GET /admin/tidoly/connect", w.startConnect)
 	m.HandleFunc("GET /admin/tidoly/back", w.finishConnect)
 	m.HandleFunc("POST /admin/tidoly/connect-link", w.page(w.connectLink))
@@ -423,6 +402,48 @@ func (w *Web) page(next func(http.ResponseWriter, *http.Request, store.User)) ht
 		rw.Header().Set("Cache-Control", "no-store")
 		next(rw, r, user)
 	}
+}
+
+// photoRoutes are the pages of the photos, which a build without them (Alone) does not answer.
+func (w *Web) photoRoutes(m *http.ServeMux) {
+	m.HandleFunc("GET /{$}", w.page(w.timeline))
+	m.HandleFunc("GET /share/{key}", w.sharePage)
+	m.HandleFunc("POST /share/{key}", w.sharePage)
+	m.HandleFunc("GET /share/{key}/{id}", w.sharePhoto)
+	m.HandleFunc("POST /web/links", w.page(w.linkMake))
+	m.HandleFunc("GET /links", w.page(w.linksPage))
+	m.HandleFunc("POST /links/{id}", w.page(w.linkChange))
+	m.HandleFunc("POST /links/{id}/delete", w.page(w.linkChange))
+	m.HandleFunc("GET /web/month/{month}", w.page(w.month))
+	m.HandleFunc("GET /web/events", w.page(w.events))
+	m.HandleFunc("GET /web/photo/{id}", w.page(w.photo))
+	m.HandleFunc("POST /web/photos/delete", w.page(w.remove))
+	m.HandleFunc("POST /web/photos/restore", w.page(w.restore))
+	m.HandleFunc("POST /web/photos/favorite", w.page(w.favorite))
+	m.HandleFunc("POST /web/photos/share", w.page(w.share))
+	m.HandleFunc("GET /web/albums", w.page(w.albumPicker))
+	m.HandleFunc("POST /web/album", w.page(w.albumChange))
+	m.HandleFunc("POST /albums", w.page(w.albumCreate))
+	m.HandleFunc("GET /trash", w.page(w.trash))
+	m.HandleFunc("POST /trash", w.page(w.trashAct))
+	m.HandleFunc("GET /places", w.page(w.places))
+	m.HandleFunc("GET /people", w.page(w.people))
+	m.HandleFunc("GET /people/{id}", w.page(w.person))
+	m.HandleFunc("POST /people/{id}/hide", w.page(w.hide))
+	m.HandleFunc("POST /people/{id}/name", w.page(w.name))
+	m.HandleFunc("GET /albums", w.page(w.albums))
+	m.HandleFunc("GET /albums/{id}", w.page(w.album))
+	m.HandleFunc("GET /status", w.page(w.status))
+	m.HandleFunc("GET /start/folders", w.page(w.startFolders))
+	m.HandleFunc("GET /start/auto", w.page(w.startAuto))
+	m.HandleFunc("GET /phone", w.phone)
+	m.HandleFunc("POST /admin/import", w.page(w.adminImport))
+	m.HandleFunc("POST /admin/import/scan", w.page(w.adminImportAct))
+	m.HandleFunc("POST /admin/import/remove", w.page(w.adminImportAct))
+	m.HandleFunc("POST /admin/import/pause", w.page(w.adminImportAct))
+	m.HandleFunc("POST /admin/coupons", w.page(w.adminCoupons))
+	m.HandleFunc("POST /admin/screenshots", w.page(w.adminScreenshots))
+	m.HandleFunc("POST /admin/faces", w.page(w.adminFaces))
 }
 
 func (w *Web) render(rw http.ResponseWriter, name string, data any) {
@@ -1051,7 +1072,10 @@ func (w *Web) placesFor(ctx context.Context, user store.User) (places, folders [
 		p := place{ID: l.ID, Path: l.Path, Photos: l.Photos, Size: bytesText(l.Bytes), Current: l.ID == current}
 		dir := w.Dir
 		if l.ID != "" {
-			dir = w.LocationDir(l.ID)
+			dir = ""
+			if w.LocationDir != nil {
+				dir = w.LocationDir(l.ID)
+			}
 			p.Missing = dir == ""
 		} else {
 			p.Path = w.Dir
@@ -1140,14 +1164,14 @@ func (w *Web) adminPage(rw http.ResponseWriter, r *http.Request, user store.User
 			usable++
 		}
 	}
-	data["CanChoose"] = usable > 1 // with one place for photos there is nothing to choose per person
+	data["CanChoose"] = usable > 1 && !w.Alone // with one place for photos there is nothing to choose per person
 	rw.WriteHeader(status)
 	w.render(rw, "admin", data)
 }
 
 // adminAddLocation makes a folder a place for photos.
 func (w *Web) adminAddLocation(rw http.ResponseWriter, r *http.Request, user store.User) {
-	if !user.IsAdmin {
+	if !user.IsAdmin || w.AddLocation == nil { // a build without photos keeps them nowhere
 		http.NotFound(rw, r)
 		return
 	}
@@ -1630,8 +1654,65 @@ func (w *Web) ownPassword(rw http.ResponseWriter, r *http.Request, user store.Us
 // The first steps after the first account: how the pages look, folders of photos already on this PC, what
 // the server sorts by itself — each can be done later in the account menu or the admin page.
 
+// stepNames are this build's first steps: the photos', or — alone — its space's own in their place, and
+// the last one opening it on another device instead of joining a phone app.
+func (w *Web) stepNames() []string {
+	if !w.Alone {
+		return installSteps
+	}
+	names := []string{"저장 위치", "준비", "첫 계정", "화면"}
+	if len(w.Spaces) > 0 && w.Spaces[0].Start != "" {
+		names = append(names, w.Spaces[0].Start)
+	}
+	return append(names, "연결 설정", "다른 기기")
+}
+
+// stepsOn is the row of steps with the one named being taken.
+func (w *Web) stepsOn(name string) []step {
+	names := w.stepNames()
+	return stepsOf(names, slices.Index(names, name)+1)
+}
+
+// stepLink is where a first step is taken.
+func (w *Web) stepLink(name string) string {
+	switch name {
+	case "화면":
+		return "/start/screen"
+	case "기존 사진":
+		return "/start/folders"
+	case "자동 정리":
+		return "/start/auto"
+	case "연결 설정":
+		return "/outside"
+	case "폰 연결", "다른 기기":
+		return "/welcome"
+	}
+	return "/start/space"
+}
+
+// next is the step after the one named, as its button says it: where it is and its name.
+func (w *Web) next(name string) map[string]string {
+	names := w.stepNames()
+	i := slices.Index(names, name)
+	if i < 0 || i+1 >= len(names) {
+		return map[string]string{"Link": "/", "Name": "설정 완료"}
+	}
+	return map[string]string{"Link": w.stepLink(names[i+1]), "Name": "다음: " + names[i+1]}
+}
+
 func (w *Web) startScreen(rw http.ResponseWriter, r *http.Request, user store.User) {
-	w.render(rw, "start-screen", map[string]any{"Title": "화면", "Steps": stepsAt(4)})
+	w.render(rw, "start-screen", map[string]any{"Title": "화면", "Steps": w.stepsOn("화면"), "Next": w.next("화면")})
+}
+
+// startSpace is the space's own first step (Space.Start), in a build without photos.
+func (w *Web) startSpace(rw http.ResponseWriter, r *http.Request, user store.User) {
+	if !w.Alone || len(w.Spaces) == 0 || w.Spaces[0].Start == "" {
+		http.NotFound(rw, r)
+		return
+	}
+	name := w.Spaces[0].Start
+	w.render(rw, "start-space", map[string]any{"Title": name, "Steps": w.stepsOn(name), "Next": w.next(name), "Name": name,
+		"Away": !lan.From(r), "User": user})
 }
 
 func (w *Web) startFolders(rw http.ResponseWriter, r *http.Request, user store.User) {
@@ -1667,19 +1748,20 @@ func (w *Web) startAuto(rw http.ResponseWriter, r *http.Request, user store.User
 // admin page. Only the first steps are taken — a form must not send anyone elsewhere.
 func back(r *http.Request) string {
 	switch next := r.FormValue("next"); next {
-	case "/start/folders", "/start/auto", "/outside":
+	case "/start/folders", "/start/auto", "/start/space", "/outside":
 		return next
 	}
 	return "/admin"
 }
 
 func (w *Web) outside(rw http.ResponseWriter, r *http.Request, user store.User) {
-	w.render(rw, "outside", map[string]any{"Title": "연결 설정", "Steps": stepsAt(7), "Outside": w.Outside(r.Context()), "VPN": w.vpnState(r.Context()), "First": true, "Away": !lan.From(r), "User": user})
+	w.render(rw, "outside", map[string]any{"Title": "연결 설정", "Steps": w.stepsOn("연결 설정"), "Next": w.next("연결 설정"), "Outside": w.Outside(r.Context()), "VPN": w.vpnState(r.Context()), "First": true, "Away": !lan.From(r), "User": user})
 }
 
 // welcome is the last step of the setup: how to join the phone, with the address as a QR code.
 func (w *Web) welcome(rw http.ResponseWriter, r *http.Request, user store.User) {
-	w.render(rw, "welcome", map[string]any{"Title": "폰 연결", "Steps": stepsAt(8), "Addr": w.addresses(r.Context()), "Data": w.Dir, "Invite": w.invite(r.Context(), "")})
+	last := w.stepNames()[len(w.stepNames())-1]
+	w.render(rw, "welcome", map[string]any{"Title": last, "Steps": w.stepsOn(last), "Addr": w.addresses(r.Context()), "Data": w.Dir, "Invite": w.invite(r.Context(), ""), "Alone": w.Alone})
 }
 
 // events tells an open page, as server-sent events, that this person's photos changed — a phone's upload
@@ -1735,6 +1817,17 @@ func (w *Web) addresses(ctx context.Context) addresses {
 // invite is the text to send someone to join their phone: through the tunnel with tidoly's login when
 // there is one, else at home with the server's own account.
 func (w *Web) invite(ctx context.Context, email string) string {
+	if w.Alone { // nothing to install: the address to open, and the address to log in with at home
+		a := w.addresses(ctx)
+		if a.Outside != "" {
+			return fmt.Sprintf("tidoly stow %s 주소: %s\n구글 계정으로 로그인합니다(Login with tidoly).", w.Edition, a.Outside)
+		}
+		text := fmt.Sprintf("tidoly stow %s 주소(집 와이파이에서): %s", w.Edition, w.Address)
+		if email != "" {
+			text += "\n로그인 주소: " + email + " — 비밀번호는 따로 받으세요."
+		}
+		return text
+	}
 	if a := w.addresses(ctx); a.Outside != "" {
 		return install.Invite(a.Outside, "", true)
 	}
@@ -1751,7 +1844,11 @@ func (w *Web) welcomeQR(rw http.ResponseWriter, r *http.Request, user store.User
 	if a.Outside != "" { // the address that works anywhere, where there is one
 		base = a.Outside
 	}
-	png, err := qrcode.Encode(base+"/phone", qrcode.Medium, 400) // a phone's camera opens it in the browser
+	page := base + "/phone" // a phone's camera opens it in the browser
+	if w.Alone {
+		page = base + "/" // nothing to join: the pages themselves
+	}
+	png, err := qrcode.Encode(page, qrcode.Medium, 400)
 	if err != nil {
 		w.fail(rw, err)
 		return
@@ -1767,7 +1864,7 @@ func (w *Web) setup(rw http.ResponseWriter, r *http.Request) {
 		http.Redirect(rw, r, "/login", http.StatusSeeOther)
 		return
 	}
-	data := map[string]any{"Title": "처음 설정", "Name": r.FormValue("name"), "Email": r.FormValue("email"), "Steps": stepsAt(3)}
+	data := map[string]any{"Title": "처음 설정", "Name": r.FormValue("name"), "Email": r.FormValue("email"), "Steps": w.stepsOn("첫 계정")}
 	if r.Method == http.MethodPost {
 		if r.FormValue("password") != r.FormValue("again") {
 			data["Problem"] = "비밀번호 두 칸이 서로 다릅니다."
