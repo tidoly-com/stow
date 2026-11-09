@@ -102,6 +102,8 @@ type Web struct {
 	// the routes those pages answer on
 	Edition string
 	Spaces  []Space
+	// MeMenu are lines a build adds to the account menu, above 도움말: what each person sets up once
+	MeMenu []MenuItem
 	// Alone: the build has no photos (#47) — its first space is all there is: no switch, no photo pages, and
 	// the first steps skip the photos'
 	Alone bool
@@ -288,7 +290,7 @@ func (w *Web) frame(ctx context.Context, user store.User, title, tab string) map
 		me = user.Email
 	}
 	data := map[string]any{"Title": title, "Tab": tab, "User": user, "Me": initial(me), "Version": w.Version, "LinksOn": w.linksOn()}
-	data["Edition"], data["Spaces"], data["Alone"] = w.Edition, w.Spaces, w.Alone
+	data["Edition"], data["Spaces"], data["Alone"], data["MeMenu"] = w.Edition, w.Spaces, w.Alone, w.MeMenu
 	if s := w.space(tab); s != nil {
 		data["Space"] = s
 	} else if w.Alone && len(w.Spaces) > 0 { // the admin page, the help: in the one menu there is

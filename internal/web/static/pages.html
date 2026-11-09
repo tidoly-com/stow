@@ -13,7 +13,7 @@
 {{if .UploadOwn}}<label class="upload button quiet" data-own><input type="file" multiple hidden>{{template "i" "upload"}}<span>올리기</span></label>{{else if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
 <details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
 <div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
-{{if not .Alone}}<a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a>{{end}}<a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
+{{if not .Alone}}<a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a>{{end}}{{range .MeMenu}}<a href="{{.Link}}"{{if eq .Tab $.Tab}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}<a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
 <div class="theme" role="group" aria-label="화면"><span>화면</span><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">밝게</button><button type="button" data-theme-set="dark">어둡게</button></div>
 <form method="post" action="/logout"><button>로그아웃</button></form>
 </div></details>

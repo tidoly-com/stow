@@ -109,7 +109,8 @@ func TestABuildWithoutPhotos(t *testing.T) {
 		Arrivals: func(context.Context) ([]store.User, error) { return nil, nil },
 		Spaces: []Space{{Name: "보관함", Link: "/docs", Trash: "/docs/trash", Start: "기존 문서",
 			Menu: []MenuItem{{Name: "문서", Icon: "/x.svg#doc", Link: "/docs", Tab: "docs"}}}},
-		TrashTabs: []TrashTab{{Name: "문서", Link: "/docs/trash"}}}
+		TrashTabs: []TrashTab{{Name: "문서", Link: "/docs/trash"}},
+		MeMenu:    []MenuItem{{Name: "AI 연결", Link: "/ai", Tab: "ai"}}}
 	noop := func(http.ResponseWriter, *http.Request) {}
 	srv := httptest.NewServer(w.Handler(noop, noop))
 	defer srv.Close()
@@ -140,7 +141,7 @@ func TestABuildWithoutPhotos(t *testing.T) {
 			t.Errorf("the admin page without photos shows %q", gone)
 		}
 	}
-	for _, want := range []string{`<a href="/docs"><svg class="i" aria-hidden="true"><use href="/x.svg#doc"/></svg>문서</a>`, `<a href="/docs/trash">`, "문서와 설정파일이 저장되는 경로입니다.", "새 문서 저장 위치", "자기 문서를 따로 가집니다", "연결 설정"} {
+	for _, want := range []string{`<a href="/docs"><svg class="i" aria-hidden="true"><use href="/x.svg#doc"/></svg>문서</a>`, `<a href="/docs/trash">`, "문서와 설정파일이 저장되는 경로입니다.", "새 문서 저장 위치", "자기 문서를 따로 가집니다", "연결 설정", `<a href="/ai">AI 연결</a><a href="/help">도움말</a>`} {
 		if !strings.Contains(admin, want) {
 			t.Errorf("the admin page without photos has no %q", want)
 		}
