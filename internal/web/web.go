@@ -1092,6 +1092,10 @@ func (w *Web) placesFor(ctx context.Context, user store.User) (places, folders [
 			continue
 		}
 		p.Owner, p.Paused, p.Mine = called[l.OwnerID], l.Paused, l.OwnerID == user.ID && !l.Paused
+		if w.FolderState == nil { // a build without photos reads no folder of them; one registered before stays as it was
+			folders = append(folders, p)
+			continue
+		}
 		if state, ok := w.FolderState(l.ID); ok && !l.Paused {
 			p.Running = state.Running
 			switch {

@@ -103,6 +103,10 @@ func TestABuildWithoutPhotos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// a folder of photos registered while the build had them (a data folder taken over): left as it is
+	if _, err := st.AddLocation(ctx, t.TempDir(), store.KindFolder, owner.ID); err != nil {
+		t.Fatal(err)
+	}
 	w := &Web{Store: st, Dir: t.TempDir(), Address: "http://192.168.0.10:30991", Edition: "Plus", Alone: true,
 		User:     func(*http.Request) (store.User, bool) { return owner, true },
 		Outside:  func(context.Context) Outside { return Outside{} },
@@ -135,7 +139,10 @@ func TestABuildWithoutPhotos(t *testing.T) {
 			t.Errorf("%s answers %d without photos", path, res.StatusCode)
 		}
 	}
-	_, admin := get("/admin")
+	res, admin := get("/admin")
+	if res.StatusCode != 200 {
+		t.Fatalf("the admin page: %d", res.StatusCode)
+	}
 	for _, gone := range []string{`class="spaces"`, `data-browse aria-label="위치 더하기"`, "인물", "기존 사진 폴더", "자동 앨범", "얼굴인식", "폰 연결 · 상태", "공유 링크", "사진 · 영상", "Immich"} {
 		if strings.Contains(admin, gone) {
 			t.Errorf("the admin page without photos shows %q", gone)
