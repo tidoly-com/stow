@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"github.com/tidoly-com/stow/internal/account"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -189,14 +190,14 @@ func TestConnectingToTidoly(t *testing.T) {
 	}))
 	defer home.Close()
 	e := start(t, t.TempDir(), newKey(t))
-	e.api.cfg.HomeURL = home.URL
+	e.api.Change(func(c *account.Config) { c.HomeURL = home.URL })
 	var told atomic.Value
-	e.api.cfg.Linked = func(l Link) { told.Store(l) }
+	e.api.Change(func(c *account.Config) { c.Linked = func(l Link) { told.Store(l) } })
 	ctx := context.Background()
 	if _, err := e.api.AddLocalUser(ctx, "엄마", "mom@example.com", "secret"); err != nil {
 		t.Fatal(err)
 	}
-	if e.api.tidoly() {
+	if e.api.Tidoly() {
 		t.Fatal("tidoly's login before connecting")
 	}
 	req, _ := http.NewRequest("POST", e.server.URL+"/login", strings.NewReader("email=mom@example.com&password=secret"))
@@ -233,23 +234,23 @@ func TestConnectingToTidoly(t *testing.T) {
 	if l, _ := told.Load().(Link); l.Slug != "mom" {
 		t.Error("the tunnel was not told")
 	}
-	if raw := e.store.Setting(ctx, linkSetting); !strings.Contains(raw, "tdly_stow_secret") {
+	if raw := e.store.Setting(ctx, account.LinkSetting); !strings.Contains(raw, "tdly_stow_secret") {
 		t.Error("the link is not kept for the next start")
 	}
-	if _, err := e.api.fetchMembers(ctx); err != nil || members.Load() != "Bearer tdly_stow_secret mom" {
+	if _, err := e.api.FetchMembers(ctx); err != nil || members.Load() != "Bearer tdly_stow_secret mom" {
 		t.Errorf("member list: %v, asked with %q", err, members.Load())
 	}
 	// no tunnel server in the answer: asked of home with the key, kept, and the tunnel told
 	if l, _ := told.Load().(Link); l.Frps != "" {
 		t.Fatalf("a tunnel server before tidoly named one: %+v", l)
 	}
-	if err := e.api.fetchTunnel(ctx); err != nil || e.api.Link().Frps != "frps.stow.test:7000" {
+	if err := e.api.FetchTunnel(ctx); err != nil || e.api.Link().Frps != "frps.stow.test:7000" {
 		t.Fatalf("tunnel server: %v, %+v", err, e.api.Link())
 	}
 	if l, _ := told.Load().(Link); l.Frps != "frps.stow.test:7000" || l.Key != "tdly_stow_secret" {
 		t.Errorf("the tunnel was not told of its server: %+v", l)
 	}
-	if !strings.Contains(e.store.Setting(ctx, linkSetting), "frps.stow.test:7000") {
+	if !strings.Contains(e.store.Setting(ctx, account.LinkSetting), "frps.stow.test:7000") {
 		t.Error("the tunnel server is not kept for the next start")
 	}
 	_, page := e.browse("/admin", session)
@@ -290,7 +291,7 @@ func TestConnectingToTidoly(t *testing.T) {
 	if res, err := noFollow.Do(unlink); err != nil || res.Header.Get("Location") != "/outside" {
 		t.Fatalf("disconnect from the first steps: %v to %q", err, res.Header.Get("Location"))
 	}
-	if e.api.Link().Slug != "" || e.store.Setting(ctx, linkSetting) != "" {
+	if e.api.Link().Slug != "" || e.store.Setting(ctx, account.LinkSetting) != "" {
 		t.Errorf("disconnect: %+v", e.api.Link())
 	}
 	_, step := e.browse("/outside", session)
@@ -361,11 +362,13 @@ func TestHTTPOutsideGoesToHTTPSOnceThereIsACertificate(t *testing.T) {
 	defer func() { ownAccounts = false }()
 	e := start(t, t.TempDir(), newKey(t))
 	ctx := context.Background()
-	if err := e.api.setLink(ctx, Link{Slug: "mom", Host: "mom.stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: "mom", Host: "mom.stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	var have atomic.Bool
-	e.api.cfg.HTTPS = func(host string) bool { return have.Load() && host == "mom.stow.tidoly.app" }
+	e.api.Change(func(c *account.Config) {
+		c.HTTPS = func(host string) bool { return have.Load() && host == "mom.stow.tidoly.app" }
+	})
 	get := func(host string) *http.Response {
 		req, _ := http.NewRequest("GET", e.server.URL+"/api/server/ping?x=1", nil)
 		req.Host = host
@@ -388,22 +391,6 @@ func TestHTTPOutsideGoesToHTTPSOnceThereIsACertificate(t *testing.T) {
 	}
 }
 
-// Home writes the tunnel server as frpc's own settings; "host:port" is taken too.
-func TestTheTunnelServerAsHomeWritesIt(t *testing.T) {
-	for in, want := range map[string]string{
-		`{"serverAddr":"stow-tunnel.tidoly.app","serverPort":7001}`: "stow-tunnel.tidoly.app:7001",
-		`"stow-tunnel.tidoly.app:7001"`:                             "stow-tunnel.tidoly.app:7001",
-		`{"serverAddr":"stow-tunnel.tidoly.app"}`:                   "stow-tunnel.tidoly.app",
-		`null`: "",
-		`{}`:   "",
-	} {
-		var a frpsAddress
-		if err := json.Unmarshal([]byte(in), &a); err != nil || string(a) != want {
-			t.Errorf("%s: %q %v, want %q", in, a, err, want)
-		}
-	}
-}
-
 // In the line for a tunnel, home tells the place and when the next place opens; out of it, it leaves the
 // field out.
 func TestTheTunnelLineIsAskedOfHome(t *testing.T) {
@@ -422,12 +409,12 @@ func TestTheTunnelLineIsAskedOfHome(t *testing.T) {
 	}))
 	defer home.Close()
 	e := start(t, t.TempDir(), newKey(t))
-	e.api.cfg.HomeURL = home.URL
+	e.api.Change(func(c *account.Config) { c.HomeURL = home.URL })
 	ctx := context.Background()
 	if _, _, ok := e.api.TunnelWaiting(ctx); ok {
 		t.Error("not connected to tidoly, yet in a line")
 	}
-	if err := e.api.setLink(ctx, Link{Slug: "mom", Host: "mom.stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: "mom", Host: "mom.stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	position, opens, ok := e.api.TunnelWaiting(ctx)

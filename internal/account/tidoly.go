@@ -1,4 +1,4 @@
-package immich
+package account
 
 import (
 	"bytes"
@@ -38,86 +38,88 @@ type Link struct {
 	Frps string `json:"frps,omitempty"` // the tunnel server tidoly named for it, host:port; "" until tidoly has one
 }
 
-const linkSetting = "tidoly"
+// LinkSetting is the setting the link is kept in.
+const LinkSetting = "tidoly"
 
 var (
-	errNoAccount = errors.New("no account here with that address")
-	errBlocked   = errors.New("tidoly's login is shut for this person")
+	ErrNoAccount = errors.New("no account here with that address")
+	ErrBlocked   = errors.New("tidoly's login is shut for this person")
 )
 
 // loadLink reads the link the owner made, unless the program was started with one (a trial).
-func (s *Server) loadLink(ctx context.Context) {
-	if s.cfg.Link.Slug != "" {
-		l := s.cfg.Link
-		s.link.Store(&l)
+func (a *Accounts) loadLink() {
+	if a.cfg.Link.Slug != "" {
+		l := a.cfg.Link
+		a.link.Store(&l)
 		return
 	}
 	var l Link
-	if raw := s.store.Setting(ctx, linkSetting); raw != "" {
+	if raw := a.store.Setting(context.Background(), LinkSetting); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &l); err != nil {
 			log.Printf("tidoly: the link kept in the settings cannot be read: %v", err)
 		}
 	}
-	s.link.Store(&l)
+	a.link.Store(&l)
 }
 
 // Link is this server's link to tidoly; an empty Slug means it has none.
-func (s *Server) Link() Link {
-	if l := s.link.Load(); l != nil {
+func (a *Accounts) Link() Link {
+	if l := a.link.Load(); l != nil {
 		return *l
 	}
 	return Link{}
 }
 
-func (s *Server) setLink(ctx context.Context, l Link) error {
+// SetLink keeps the link and tells the tunnel: the owner connecting or disconnecting, or a trial.
+func (a *Accounts) SetLink(ctx context.Context, l Link) error {
 	raw := ""
 	if l.Slug != "" {
 		b, _ := json.Marshal(l)
 		raw = string(b)
 	}
-	if err := s.store.SetSetting(ctx, linkSetting, raw); err != nil {
+	if err := a.store.SetSetting(ctx, LinkSetting, raw); err != nil {
 		return err
 	}
-	s.link.Store(&l)
-	s.linkProblem.Store("")
-	if s.cfg.Linked != nil {
-		s.cfg.Linked(l)
+	a.link.Store(&l)
+	a.linkProblem.Store("")
+	if a.cfg.Linked != nil {
+		a.cfg.Linked(l)
 	}
 	return nil
 }
 
-// tidoly says whether tickets from tidoly-home are taken: the server has a slug and home's key to check them.
-func (s *Server) tidoly() bool {
-	return s.Link().Slug != "" && len(s.cfg.HomeKey) == ed25519.PublicKeySize
+// Tidoly says whether tickets from tidoly-home are taken: the server has a slug and home's key to check them.
+func (a *Accounts) Tidoly() bool {
+	return a.Link().Slug != "" && len(a.cfg.HomeKey) == ed25519.PublicKeySize
 }
 
-func (s *Server) verifier() ticket.Verifier {
-	return ticket.Verifier{Key: s.cfg.HomeKey, Issuer: s.cfg.HomeURL, Slug: s.Link().Slug}
+func (a *Accounts) verifier() ticket.Verifier {
+	return ticket.Verifier{Key: a.cfg.HomeKey, Issuer: a.cfg.HomeURL, Slug: a.Link().Slug}
 }
 
-// loginBase is the address a login through tidoly comes back to: the address outside.
-func (s *Server) loginBase() string {
-	if host := s.Link().Host; host != "" {
+// LoginBase is the address a login through tidoly comes back to: the address outside.
+func (a *Accounts) LoginBase() string {
+	if host := a.Link().Host; host != "" {
 		return "https://" + host
 	}
-	return s.cfg.PublicURL
+	return a.cfg.PublicURL
 }
 
-func (s *Server) mobileRedirect() string { return s.loginBase() + "/api/oauth/mobile-redirect" }
+func (a *Accounts) MobileRedirect() string { return a.LoginBase() + "/api/oauth/mobile-redirect" }
 
 // TidolyHere says whether a browser at this address can log in with tidoly: home sends it back to the
 // address outside, and the login cookie must be there when it comes.
-func (s *Server) TidolyHere(r *http.Request) bool {
-	if !s.tidoly() {
+func (a *Accounts) TidolyHere(r *http.Request) bool {
+	if !a.Tidoly() {
 		return false
 	}
-	base, err := url.Parse(s.loginBase())
+	base, err := url.Parse(a.LoginBase())
 	return err == nil && strings.EqualFold(base.Host, r.Host)
 }
 
-// secure says whether the request came over https: at the address outside it did — the tunnel's entrance
+// Secure says whether the request came over https: at the address outside it did — the tunnel's entrance
 // is https — even where the last step, from frpc on this machine, is not.
-func (s *Server) secure(r *http.Request) bool {
+func (a *Accounts) Secure(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
@@ -125,10 +127,10 @@ func (s *Server) secure(r *http.Request) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	if l := s.Link(); l.Host != "" {
+	if l := a.Link(); l.Host != "" {
 		return strings.EqualFold(host, l.Host)
 	}
-	return strings.HasPrefix(s.cfg.PublicURL, "https://")
+	return strings.HasPrefix(a.cfg.PublicURL, "https://")
 }
 
 // ── who a ticket lets in ────────────────────────────────────────────────────────────────────────────────────
@@ -137,79 +139,79 @@ const autoAddSetting = "tidoly-auto-add"
 
 // AutoAdd says whether someone home lists for this server gets an account the first time they come. On
 // unless the owner switched it off.
-func (s *Server) AutoAdd(ctx context.Context) bool {
-	return s.store.Setting(ctx, autoAddSetting) != "off"
+func (a *Accounts) AutoAdd(ctx context.Context) bool {
+	return a.store.Setting(ctx, autoAddSetting) != "off"
 }
 
-func (s *Server) SetAutoAdd(ctx context.Context, on bool) error {
+func (a *Accounts) SetAutoAdd(ctx context.Context, on bool) error {
 	value := "off"
 	if on {
 		value = ""
 	}
-	return s.store.SetSetting(ctx, autoAddSetting, value)
+	return a.store.SetSetting(ctx, autoAddSetting, value)
 }
 
 // ticketUser is the account a ticket opens: the one with its Google address. Without one, a person home
 // lists gets one now as an ordinary member — never as the owner: home cannot make anyone the owner here.
 // Only the very first account of a server nobody has come into yet is made the owner's, when home says so.
-func (s *Server) ticketUser(ctx context.Context, c ticket.Claims) (store.User, error) {
+func (a *Accounts) ticketUser(ctx context.Context, c ticket.Claims) (store.User, error) {
 	email := strings.ToLower(strings.TrimSpace(c.Email))
 	if !strings.Contains(email, "@") {
 		return store.User{}, errors.New("the ticket has no address")
 	}
-	user, _, err := s.store.UserByEmail(ctx, email)
+	user, _, err := a.store.UserByEmail(ctx, email)
 	if err == nil {
 		if user.Blocked {
-			return store.User{}, errBlocked
+			return store.User{}, ErrBlocked
 		}
 		return user, nil
 	}
-	n, err := s.store.CountUsers(ctx)
+	n, err := a.store.CountUsers(ctx)
 	if err != nil {
 		return store.User{}, err
 	}
-	if n > 0 && !s.AutoAdd(ctx) {
-		return store.User{}, errNoAccount
+	if n > 0 && !a.AutoAdd(ctx) {
+		return store.User{}, ErrNoAccount
 	}
 	name := strings.TrimSpace(c.Name)
 	if name == "" {
 		name, _, _ = strings.Cut(email, "@")
 	}
-	user, err = s.store.UpsertUser(ctx, "tidoly:"+c.Subject, email, name, n == 0 && c.Role == "owner")
+	user, err = a.store.UpsertUser(ctx, "tidoly:"+c.Subject, email, name, n == 0 && c.Role == "owner")
 	if err == nil {
 		log.Printf("tidoly: %s came for the first time and was given an account", email)
 	}
 	return user, err
 }
 
-// ticketLogin checks a ticket, spends it and opens a session for the person it names.
-func (s *Server) ticketLogin(ctx context.Context, code, verifier string) (store.User, string, error) {
-	if !s.tidoly() {
+// TicketLogin checks a ticket, spends it and opens a session for the person it names.
+func (a *Accounts) TicketLogin(ctx context.Context, code, verifier string) (store.User, string, error) {
+	if !a.Tidoly() {
 		return store.User{}, "", errors.New("this server is not connected to tidoly")
 	}
-	claims, err := s.verifier().Verify(code, verifier, time.Now())
+	claims, err := a.verifier().Verify(code, verifier, time.Now())
 	if err != nil {
 		return store.User{}, "", err
 	}
-	if fresh, err := s.store.SpendTicket(ctx, claims.ID, claims.Expires); err != nil {
+	if fresh, err := a.store.SpendTicket(ctx, claims.ID, claims.Expires); err != nil {
 		return store.User{}, "", err
 	} else if !fresh {
-		return store.User{}, "", errAlreadyUsed
+		return store.User{}, "", ErrAlreadyUsed
 	}
-	user, err := s.ticketUser(ctx, claims)
+	user, err := a.ticketUser(ctx, claims)
 	if err != nil {
 		return store.User{}, "", err
 	}
-	token := newToken()
-	if err := s.store.CreateSession(ctx, token, user.ID, store.ViaTidoly); err != nil {
+	token := NewToken()
+	if err := a.store.CreateSession(ctx, token, user.ID, store.ViaTidoly); err != nil {
 		return store.User{}, "", err
 	}
 	return user, token, nil
 }
 
 // Block shuts tidoly's login for one person — the sessions they opened with it end now — or opens it again.
-func (s *Server) Block(ctx context.Context, userID string, blocked bool) error {
-	return s.store.Block(ctx, userID, blocked)
+func (a *Accounts) Block(ctx context.Context, userID string, blocked bool) error {
+	return a.store.Block(ctx, userID, blocked)
 }
 
 // ── what the owner is told ──────────────────────────────────────────────────────────────────────────────────
@@ -218,9 +220,9 @@ const arrivalsSetting = "tidoly-arrivals-seen"
 
 // Arrivals are the people tidoly made an account for, who came in for the first time since the owner last
 // looked: the way to notice someone home let in that the owner did not expect.
-func (s *Server) Arrivals(ctx context.Context) ([]store.User, error) {
-	seen := s.store.Setting(ctx, arrivalsSetting)
-	users, err := s.store.Users(ctx)
+func (a *Accounts) Arrivals(ctx context.Context) ([]store.User, error) {
+	seen := a.store.Setting(ctx, arrivalsSetting)
+	users, err := a.store.Users(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +238,8 @@ func (s *Server) Arrivals(ctx context.Context) ([]store.User, error) {
 
 // SeenArrivals records that the owner has seen who came: the latest of them, not the time of looking — someone
 // coming in the same moment is still shown.
-func (s *Server) SeenArrivals(ctx context.Context) error {
-	arrivals, err := s.Arrivals(ctx)
+func (a *Accounts) SeenArrivals(ctx context.Context) error {
+	arrivals, err := a.Arrivals(ctx)
 	if err != nil || len(arrivals) == 0 {
 		return err
 	}
@@ -245,12 +247,12 @@ func (s *Server) SeenArrivals(ctx context.Context) error {
 	for _, u := range arrivals {
 		latest = max(latest, u.TidolyAt)
 	}
-	return s.store.SetSetting(ctx, arrivalsSetting, latest)
+	return a.store.SetSetting(ctx, arrivalsSetting, latest)
 }
 
 // LinkProblem is what went wrong with tidoly lately, for the admin page: "" if nothing did.
-func (s *Server) LinkProblem() string {
-	p, _ := s.linkProblem.Load().(string)
+func (a *Accounts) LinkProblem() string {
+	p, _ := a.linkProblem.Load().(string)
 	return p
 }
 
@@ -259,47 +261,47 @@ func (s *Server) LinkProblem() string {
 // ConnectStart sends the owner's browser to tidoly to sign in, agree, and choose the server's name. Home
 // sends it back here with a code only good together with the verifier kept in the cookie; the key itself
 // never passes through the browser.
-func (s *Server) ConnectStart(w http.ResponseWriter, r *http.Request) {
-	state, verifier := newToken(), newToken()
+func (a *Accounts) ConnectStart(w http.ResponseWriter, r *http.Request) {
+	state, verifier := NewToken(), NewToken()
 	sum := sha256.Sum256([]byte(verifier))
-	http.SetCookie(w, s.webCookie(r, "stow_connect", state+"."+verifier, 900))
+	http.SetCookie(w, a.webCookie(r, "stow_connect", state+"."+verifier, 900))
 	scheme := "http"
-	if s.secure(r) {
+	if a.Secure(r) {
 		scheme = "https"
 	}
 	q := url.Values{"return": {scheme + "://" + r.Host + "/admin/tidoly/back"}, "state": {state},
 		"cc": {base64.RawURLEncoding.EncodeToString(sum[:])}}
-	http.Redirect(w, r, s.cfg.HomeURL+"/stow/connect?"+q.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, a.cfg.HomeURL+"/stow/connect?"+q.Encode(), http.StatusSeeOther)
 }
 
 // ConnectBack takes the code home sent the browser back with and trades it for this server's key.
-func (s *Server) ConnectBack(w http.ResponseWriter, r *http.Request) error {
-	c, err := r.Cookie(s.cookieName(r, "stow_connect"))
+func (a *Accounts) ConnectBack(w http.ResponseWriter, r *http.Request) error {
+	c, err := r.Cookie(a.CookieName(r, "stow_connect"))
 	if err != nil {
 		return errors.New("the connection was not started from this browser, or took too long")
 	}
-	http.SetCookie(w, s.webCookie(r, "stow_connect", "", -1))
+	http.SetCookie(w, a.webCookie(r, "stow_connect", "", -1))
 	state, verifier, _ := strings.Cut(c.Value, ".")
 	code := r.URL.Query().Get("code")
 	if state == "" || state != r.URL.Query().Get("state") || code == "" {
 		return errors.New("the answer from tidoly does not belong to this connection")
 	}
-	l, err := s.serverKey(r.Context(), code, verifier)
+	l, err := a.serverKey(r.Context(), code, verifier)
 	if err != nil {
 		return err
 	}
 	log.Printf("tidoly: connected as %s", l.Host)
-	return s.setLink(r.Context(), l)
+	return a.SetLink(r.Context(), l)
 }
 
-func (s *Server) serverKey(ctx context.Context, code, verifier string) (Link, error) {
+func (a *Accounts) serverKey(ctx context.Context, code, verifier string) (Link, error) {
 	body, _ := json.Marshal(map[string]string{"code": code, "verifier": verifier})
-	req, err := http.NewRequestWithContext(ctx, "POST", s.cfg.HomeURL+"/stow/server-key", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", a.cfg.HomeURL+"/stow/server-key", bytes.NewReader(body))
 	if err != nil {
 		return Link{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := s.homeClient().Do(req)
+	res, err := a.homeClient().Do(req)
 	if err != nil {
 		return Link{}, err
 	}
@@ -333,55 +335,55 @@ func (s *Server) serverKey(ctx context.Context, code, verifier string) (Link, er
 
 // Disconnect forgets the link: the tunnel closes and tidoly's login stops. Home still has the key until
 // the owner ends it there, or connects again.
-func (s *Server) Disconnect(ctx context.Context) error {
+func (a *Accounts) Disconnect(ctx context.Context) error {
 	log.Printf("tidoly: disconnected")
-	if host := s.Link().Host; host != "" { // shown when connecting again: the address it had
-		if err := s.store.SetSetting(ctx, lastHostSetting, host); err != nil {
+	if host := a.Link().Host; host != "" { // shown when connecting again: the address it had
+		if err := a.store.SetSetting(ctx, lastHostSetting, host); err != nil {
 			return err
 		}
 	}
-	return s.setLink(ctx, Link{})
+	return a.SetLink(ctx, Link{})
 }
 
 const lastHostSetting = "tidoly-last-host"
 
 // LastHost is the address outside this server had the last time it was connected; "" if it never was.
-func (s *Server) LastHost(ctx context.Context) string { return s.store.Setting(ctx, lastHostSetting) }
+func (a *Accounts) LastHost(ctx context.Context) string { return a.store.Setting(ctx, lastHostSetting) }
 
-func (s *Server) homeClient() *http.Client { return &http.Client{Timeout: 15 * time.Second} }
+func (a *Accounts) homeClient() *http.Client { return &http.Client{Timeout: 15 * time.Second} }
 
 // CallHome is a request to home made as this server, with its key: the answer's status and body. For the
 // certificate (internal/certs); a 401 is told to the owner as everywhere else.
-func (s *Server) CallHome(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
-	if s.Link().Key == "" {
+func (a *Accounts) CallHome(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	if a.Link().Key == "" {
 		return 0, nil, ErrNotLinked
 	}
-	req, err := s.homeRequest(ctx, method, path, body)
+	req, err := a.homeRequest(ctx, method, path, body)
 	if err != nil {
 		return 0, nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res, err := s.homeClient().Do(req)
+	res, err := a.homeClient().Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
 	defer res.Body.Close()
 	answer, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode == http.StatusUnauthorized {
-		s.linkProblem.Store(keyRefused)
+		a.linkProblem.Store(keyRefused)
 	}
 	return res.StatusCode, answer, err
 }
 
 // homeRequest is a request to home made as this server: with its key.
-func (s *Server) homeRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, method, s.cfg.HomeURL+path, bytes.NewReader(body))
+func (a *Accounts) homeRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, a.cfg.HomeURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	if key := s.Link().Key; key != "" {
+	if key := a.Link().Key; key != "" {
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	if body != nil {
@@ -394,15 +396,15 @@ func (s *Server) homeRequest(ctx context.Context, method, path string, body []by
 
 // WatchMembers closes the tidoly sessions of people home no longer lists for this server. A session outlives
 // the ticket that opened it, so removal has to arrive this way. If home cannot be reached, nothing changes.
-func (s *Server) WatchMembers(ctx context.Context, every time.Duration) {
+func (a *Accounts) WatchMembers(ctx context.Context, every time.Duration) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	var askedTunnel time.Time
 	for {
 		// at most once a minute; half a tick of slack so a tick of exactly a minute does not skip every other one
-		if l := s.Link(); l.Key != "" && l.Frps == "" && time.Since(askedTunnel) >= time.Minute-every/2 {
+		if l := a.Link(); l.Key != "" && l.Frps == "" && time.Since(askedTunnel) >= time.Minute-every/2 {
 			askedTunnel = time.Now()
-			if err := s.fetchTunnel(ctx); err != nil && !errors.Is(err, errKeyRefused) {
+			if err := a.FetchTunnel(ctx); err != nil && !errors.Is(err, errKeyRefused) {
 				log.Printf("tunnel server: %v", err)
 			}
 		}
@@ -411,14 +413,14 @@ func (s *Server) WatchMembers(ctx context.Context, every time.Duration) {
 			return
 		case <-tick.C:
 		}
-		if !s.tidoly() {
+		if !a.Tidoly() {
 			continue
 		}
-		emails, err := s.fetchMembers(ctx)
+		emails, err := a.FetchMembers(ctx)
 		if err != nil {
 			continue
 		}
-		if n, err := s.store.DropTidolySessionsExcept(ctx, emails); err != nil {
+		if n, err := a.store.DropTidolySessionsExcept(ctx, emails); err != nil {
 			log.Printf("members: %v", err)
 		} else if n > 0 {
 			log.Printf("members: closed %d session(s) of people no longer listed", n)
@@ -460,20 +462,20 @@ var errKeyRefused = errors.New("tidoly does not take this server's key")
 // same address, which ends the old key, or tidoly stopped the address.
 const keyRefused = "tidoly 가 이 서버의 열쇠를 받지 않습니다 — 다른 PC 가 같은 주소로 연결했거나, tidoly 가 이 주소를 멈췄습니다. 이 PC 로 다시 연결하거나 tidoly 에 문의해 주세요."
 
-// fetchTunnel asks home which tunnel server this server is to use, when the key came without one; once
+// FetchTunnel asks home which tunnel server this server is to use, when the key came without one; once
 // there is one, the tunnel opens.
-func (s *Server) fetchTunnel(ctx context.Context) error {
-	req, err := s.homeRequest(ctx, "GET", "/stow/tunnel", nil)
+func (a *Accounts) FetchTunnel(ctx context.Context) error {
+	req, err := a.homeRequest(ctx, "GET", "/stow/tunnel", nil)
 	if err != nil {
 		return err
 	}
-	res, err := s.homeClient().Do(req)
+	res, err := a.homeClient().Do(req)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized {
-		s.linkProblem.Store(keyRefused)
+		a.linkProblem.Store(keyRefused)
 		return errKeyRefused
 	}
 	if res.StatusCode != 200 {
@@ -488,24 +490,24 @@ func (s *Server) fetchTunnel(ctx context.Context) error {
 	if body.Frps == "" {
 		return nil // not yet
 	}
-	l := s.Link()
+	l := a.Link()
 	l.Frps = string(body.Frps)
 	log.Printf("tidoly: tunnel server %s", l.Frps)
-	return s.setLink(ctx, l)
+	return a.SetLink(ctx, l)
 }
 
 // TunnelWaiting asks home where this server is in the line for a tunnel, which it joins when the week's
 // new tunnels are taken: its place, and when the next place opens. ok is false when it is not in the line
 // (home leaves the field out), or home cannot be asked.
-func (s *Server) TunnelWaiting(ctx context.Context) (position int, opensAt time.Time, ok bool) {
-	if s.Link().Key == "" {
+func (a *Accounts) TunnelWaiting(ctx context.Context) (position int, opensAt time.Time, ok bool) {
+	if a.Link().Key == "" {
 		return 0, time.Time{}, false
 	}
-	req, err := s.homeRequest(ctx, "GET", "/stow/tunnel", nil)
+	req, err := a.homeRequest(ctx, "GET", "/stow/tunnel", nil)
 	if err != nil {
 		return 0, time.Time{}, false
 	}
-	res, err := s.homeClient().Do(req)
+	res, err := a.homeClient().Do(req)
 	if err != nil {
 		log.Printf("tunnel line: %v", err)
 		return 0, time.Time{}, false
@@ -527,24 +529,25 @@ func (s *Server) TunnelWaiting(ctx context.Context) (position int, opensAt time.
 	return body.Waiting.Position, body.Waiting.OpensAt, true
 }
 
-func (s *Server) fetchMembers(ctx context.Context) ([]string, error) {
-	req, err := s.homeRequest(ctx, "GET", "/stow/members?slug="+url.QueryEscape(s.Link().Slug), nil)
+// FetchMembers asks home for the addresses of the people it lists for this server.
+func (a *Accounts) FetchMembers(ctx context.Context) ([]string, error) {
+	req, err := a.homeRequest(ctx, "GET", "/stow/members?slug="+url.QueryEscape(a.Link().Slug), nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.homeClient().Do(req)
+	res, err := a.homeClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized {
-		s.linkProblem.Store(keyRefused)
+		a.linkProblem.Store(keyRefused)
 		return nil, errKeyRefused
 	}
 	if res.StatusCode != 200 {
 		return nil, errors.New(res.Status)
 	}
-	s.linkProblem.Store("")
+	a.linkProblem.Store("")
 	var body struct {
 		Members *[]struct {
 			Email string `json:"email"`

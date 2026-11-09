@@ -1,4 +1,4 @@
-package immich
+package account
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -44,7 +43,8 @@ func hashPassword(password string) string {
 // HashPassword is a password as it is kept: an account's, or a shared link's.
 func HashPassword(password string) string { return hashPassword(password) }
 
-func passwordMatches(hash, password string) bool {
+// PasswordMatches says whether password is the one kept as hash.
+func PasswordMatches(hash, password string) bool {
 	saltText, keyText, ok := strings.Cut(hash, ".")
 	salt, err1 := base64.RawStdEncoding.DecodeString(saltText)
 	want, err2 := base64.RawStdEncoding.DecodeString(keyText)
@@ -55,22 +55,27 @@ func passwordMatches(hash, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// tries counts wrong passwords per address; five in a row make that address wait a minute.
-type tries struct {
+// Tries counts wrong passwords per name — an address, a link; five in a row make that name wait a minute.
+type Tries struct {
 	mu    sync.Mutex
 	wrong map[string]int
 	until map[string]time.Time
 }
 
-var guesses = tries{wrong: map[string]int{}, until: map[string]time.Time{}}
+// NewTries is a count of wrong passwords with none yet.
+func NewTries() *Tries { return &Tries{wrong: map[string]int{}, until: map[string]time.Time{}} }
 
-func (t *tries) blocked(email string) bool {
+var guesses = NewTries()
+
+// Blocked says whether name is made to wait.
+func (t *Tries) Blocked(email string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return time.Now().Before(t.until[email])
 }
 
-func (t *tries) note(email string, ok bool) {
+// Note counts a try with name, right or wrong.
+func (t *Tries) Note(email string, ok bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if ok {
@@ -83,120 +88,89 @@ func (t *tries) note(email string, ok bool) {
 }
 
 // NeedsOwner reports that nobody has an account yet: the first person to come sets the server up.
-func (s *Server) NeedsOwner(ctx context.Context) bool {
-	n, err := s.store.CountUsers(ctx)
+func (a *Accounts) NeedsOwner(ctx context.Context) bool {
+	n, err := a.store.CountUsers(ctx)
 	return err == nil && n == 0
 }
 
 // AddLocalUser makes an account. The first one made owns the server.
-func (s *Server) AddLocalUser(ctx context.Context, name, email, password string) (store.User, error) {
+func (a *Accounts) AddLocalUser(ctx context.Context, name, email, password string) (store.User, error) {
 	name, email = strings.TrimSpace(name), strings.ToLower(strings.TrimSpace(email))
 	if !strings.Contains(email, "@") || len(password) < 4 || len(email) > 200 || len(password) > 200 {
 		return store.User{}, ErrWeak
 	}
-	if _, _, err := s.store.UserByEmail(ctx, email); err == nil {
+	if _, _, err := a.store.UserByEmail(ctx, email); err == nil {
 		return store.User{}, ErrTaken
 	}
 	if name == "" {
 		name, _, _ = strings.Cut(email, "@")
 	}
-	n, err := s.store.CountUsers(ctx)
+	n, err := a.store.CountUsers(ctx)
 	if err != nil {
 		return store.User{}, err
 	}
-	user, err := s.store.UpsertUser(ctx, "local:"+email, email, name, n == 0)
+	user, err := a.store.UpsertUser(ctx, "local:"+email, email, name, n == 0)
 	if err != nil {
 		return store.User{}, err
 	}
-	return user, s.store.SetPassword(ctx, user.ID, hashPassword(password))
+	return user, a.store.SetPassword(ctx, user.ID, hashPassword(password))
 }
 
 // SetLocalPassword gives a person a new password.
-func (s *Server) SetLocalPassword(ctx context.Context, userID, password string) error {
+func (a *Accounts) SetLocalPassword(ctx context.Context, userID, password string) error {
 	if len(password) < 4 || len(password) > 200 {
 		return ErrWeak
 	}
-	return s.store.SetPassword(ctx, userID, hashPassword(password))
+	return a.store.SetPassword(ctx, userID, hashPassword(password))
 }
 
 // ChangeOwnPassword lets a person replace their password, given the one they have now. Wrong guesses
 // count as wrong logins do.
-func (s *Server) ChangeOwnPassword(ctx context.Context, email, current, next string) error {
-	if guesses.blocked(email) {
+func (a *Accounts) ChangeOwnPassword(ctx context.Context, email, current, next string) error {
+	if guesses.Blocked(email) {
 		return ErrWait
 	}
-	user, hash, err := s.store.UserByEmail(ctx, email)
-	ok := err == nil && hash != "" && passwordMatches(hash, current)
-	guesses.note(email, ok)
+	user, hash, err := a.store.UserByEmail(ctx, email)
+	ok := err == nil && hash != "" && PasswordMatches(hash, current)
+	guesses.Note(email, ok)
 	if !ok {
 		return ErrBadLogin
 	}
-	return s.SetLocalPassword(ctx, user.ID, next)
+	return a.SetLocalPassword(ctx, user.ID, next)
 }
 
-// localLogin checks an address and a password and opens a session. The server's own accounts log in only
+// LocalLogin checks an address and a password and opens a session. The server's own accounts log in only
 // at home: from outside, through the tunnel, one logs in with tidoly (internal/lan). A request from outside
 // is refused before the password is looked at, and is not counted as a wrong try.
-func (s *Server) localLogin(r *http.Request, email, password string) (store.User, string, error) {
+func (a *Accounts) LocalLogin(r *http.Request, email, password string) (store.User, string, error) {
 	ctx := r.Context()
 	if !lan.From(r) {
 		return store.User{}, "", ErrNotHome
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
-	if guesses.blocked(email) {
+	if guesses.Blocked(email) {
 		return store.User{}, "", ErrWait
 	}
-	user, hash, err := s.store.UserByEmail(ctx, email)
-	ok := err == nil && hash != "" && passwordMatches(hash, password)
-	guesses.note(email, ok)
+	user, hash, err := a.store.UserByEmail(ctx, email)
+	ok := err == nil && hash != "" && PasswordMatches(hash, password)
+	guesses.Note(email, ok)
 	if !ok {
 		return store.User{}, "", ErrBadLogin
 	}
-	token := newToken()
-	if err := s.store.CreateSession(ctx, token, user.ID, store.ViaHome); err != nil {
+	token := NewToken()
+	if err := a.store.CreateSession(ctx, token, user.ID, store.ViaHome); err != nil {
 		return store.User{}, "", err
 	}
 	return user, token, nil
 }
 
 // WebLocalLogin logs a browser in with an address and a password; on success the session cookie is set.
-func (s *Server) WebLocalLogin(w http.ResponseWriter, r *http.Request, email, password string) error {
-	user, token, err := s.localLogin(r, email, password)
+func (a *Accounts) WebLocalLogin(w http.ResponseWriter, r *http.Request, email, password string) error {
+	user, token, err := a.LocalLogin(r, email, password)
 	if err != nil {
 		return err
 	}
 	log.Printf("logged in (browser): %s", user.Email)
-	http.SetCookie(w, s.webCookie(r, "stow_session", token, 400*24*3600))
+	http.SetCookie(w, a.webCookie(r, "stow_session", token, 400*24*3600))
 	return nil
-}
-
-// passwordLogin is the app's login with an address and a password: POST /api/auth/login.
-func (s *Server) passwordLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Email, Password string }
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req) != nil {
-		writeError(w, 400, "Bad request")
-		return
-	}
-	user, token, err := s.localLogin(r, req.Email, req.Password)
-	switch {
-	case errors.Is(err, ErrNotHome):
-		writeError(w, 403, "Log in with an address and a password only at home, on the same Wi-Fi")
-		return
-	case errors.Is(err, ErrWait):
-		writeError(w, 429, "Too many wrong tries; wait a minute")
-		return
-	case errors.Is(err, ErrBadLogin):
-		writeError(w, 401, "Incorrect email or password")
-		return
-	case err != nil:
-		log.Printf("login: %v", err)
-		writeError(w, 500, "Internal error")
-		return
-	}
-	log.Printf("logged in (app): %s", user.Email)
-	s.setAuthCookies(w, r, token, "password")
-	body := fixture("login")
-	body["accessToken"], body["userId"], body["userEmail"], body["name"] = token, user.ID, user.Email, user.Name
-	body["isAdmin"], body["isOnboarded"] = user.IsAdmin, true
-	writeJSON(w, 201, body)
 }
