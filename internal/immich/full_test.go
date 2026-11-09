@@ -72,7 +72,7 @@ func TestHEICZoomIsMadeOnceAndOnlyWhereTheOriginalMayGo(t *testing.T) {
 	}
 
 	// through a shared link: as the original goes, so does the full picture
-	if err := e.api.setLink(ctx, Link{Slug: testSlug, Host: testSlug + ".stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: testSlug, Host: testSlug + ".stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	status, raw := e.call("POST", "/api/shared-links", phone, map[string]any{"type": "INDIVIDUAL", "assetIds": []string{hID}})
@@ -110,7 +110,7 @@ func TestALinkThatKeepsOriginalsBackNeverSendsOneForAThumbnail(t *testing.T) {
 	for _, size := range []string{"thumbnail", "preview"} { // as before the thumbnail job has run
 		os.Remove(e.api.cfg.Thumbs.Path(id, size))
 	}
-	if err := e.api.setLink(ctx, Link{Slug: testSlug, Host: testSlug + ".stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: testSlug, Host: testSlug + ".stow.tidoly.app", Key: "tdly_stow_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	status, raw := e.call("POST", "/api/shared-links", phone, map[string]any{"type": "INDIVIDUAL", "assetIds": []string{id}, "allowDownload": false})

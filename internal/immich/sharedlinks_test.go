@@ -47,7 +47,7 @@ func TestSharedLinks(t *testing.T) {
 	}
 	cookie := e.browserLogin("owner@example.com", "owner") // before the address outside: the tests reach the server here
 	host := testSlug + ".stow.tidoly.app"
-	if err := e.api.setLink(ctx, Link{Slug: testSlug, Host: host, Key: "tdly_stow_secret"}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: testSlug, Host: host, Key: "tdly_stow_secret"}); err != nil {
 		t.Fatal(err)
 	}
 	var prefs map[string]any
@@ -156,7 +156,7 @@ func TestSharedLinks(t *testing.T) {
 	if status, _ := e.call("DELETE", "/api/shared-links/"+id, phone, nil); status != 204 {
 		t.Errorf("delete: %d", status)
 	}
-	if err := e.api.setLink(ctx, Link{Slug: testSlug}); err != nil {
+	if err := e.api.SetLink(ctx, Link{Slug: testSlug}); err != nil {
 		t.Fatal(err)
 	}
 	if res, _ := e.browse("/share/" + albumKey); res.StatusCode != 404 {

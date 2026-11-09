@@ -1233,7 +1233,7 @@ func TestOverHTTPSTheCookiesAreLockedToThisHost(t *testing.T) {
 	if c.Name != "__Host-stow_login" || !c.Secure || !c.HttpOnly || c.Path != "/" || c.Domain != "" {
 		t.Errorf("login cookie over https: %+v", c)
 	}
-	if got := api.cookieName(r, "stow_session"); got != "__Host-stow_session" {
+	if got := api.CookieName(r, "stow_session"); got != "__Host-stow_session" {
 		t.Errorf("session cookie name over https: %s", got)
 	}
 }

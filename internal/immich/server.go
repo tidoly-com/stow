@@ -4,12 +4,9 @@
 package immich
 
 import (
-	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"database/sql"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tidoly-com/stow/internal/account"
 	"github.com/tidoly-com/stow/internal/coupons"
 	"github.com/tidoly-com/stow/internal/disk"
 	"github.com/tidoly-com/stow/internal/faces"
@@ -67,7 +65,13 @@ type Config struct {
 	Coupons *coupons.Helper // reads the words of a coupon, for its last day (macOS); nil: coupons go in without one
 }
 
+// Link is what this server knows of its place with tidoly (internal/account).
+type Link = account.Link
+
+// A Server is the photo server. Who comes in — accounts, sessions, the link to tidoly — is the accounts it
+// stands on, as every build does; their methods are its own.
 type Server struct {
+	*account.Accounts
 	cfg    Config
 	store  *store.Store
 	lib    *library.Library
@@ -80,9 +84,6 @@ type Server struct {
 
 	faceHelper  atomic.Pointer[faces.Helper] // set once the models are there; Config.Faces starts with it
 	faceWaiting atomic.Bool                  // the models are being fetched
-
-	link        atomic.Pointer[Link] // this server's link to tidoly
-	linkProblem atomic.Value         // string: what went wrong with it lately
 }
 
 type session struct {
@@ -96,10 +97,11 @@ func New(cfg Config, st *store.Store, lib *library.Library, runner *jobs.Runner)
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	cfg.HomeURL = strings.TrimRight(cfg.HomeURL, "/")
 	s := &Server{cfg: cfg, store: st, lib: lib, runner: runner, mux: http.NewServeMux()}
+	s.Accounts = account.New(account.Config{PublicURL: cfg.PublicURL, HomeURL: cfg.HomeURL, HomeKey: cfg.HomeKey,
+		Link: cfg.Link, Linked: cfg.Linked, HTTPS: cfg.HTTPS, Token: appToken}, st)
 	if cfg.Faces != nil {
 		s.faceHelper.Store(cfg.Faces)
 	}
-	s.loadLink(context.Background())
 	m := s.mux
 
 	m.HandleFunc("GET /.well-known/immich", func(w http.ResponseWriter, r *http.Request) {
@@ -181,9 +183,7 @@ func (s *Server) Pages(h http.Handler) { s.mux.Handle("/", h) }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	rec := &statusRecorder{ResponseWriter: w, status: 200}
-	if host := s.Link().Host; r.TLS == nil && host != "" && strings.EqualFold(r.Host, host) && s.cfg.HTTPS != nil && s.cfg.HTTPS(host) {
-		http.Redirect(rec, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
-	} else {
+	if !s.ToHTTPS(rec, r) {
 		s.mux.ServeHTTP(rec, r)
 	}
 	log.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
@@ -228,25 +228,17 @@ const (
 	cookieIsAuth = "immich_is_authenticated"
 )
 
-func (s *Server) requestToken(r *http.Request) string {
-	if c, err := r.Cookie(cookieToken); err == nil && c.Value != "" {
+// appToken is the session the app's cookie carries: tried before the ways every build knows (account).
+func appToken(r *http.Request) string {
+	if c, err := r.Cookie(cookieToken); err == nil {
 		return c.Value
 	}
-	if c, err := r.Cookie(s.cookieName(r, "stow_session")); err == nil && c.Value != "" { // a browser on the web pages
-		return c.Value
-	}
-	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		return bearer
-	}
-	if key := r.URL.Query().Get("sessionKey"); key != "" && r.Method == "GET" { // a device that can only be given an address
-		return key
-	}
-	return r.Header.Get("x-immich-user-token")
+	return ""
 }
 
 func (s *Server) authed(next func(http.ResponseWriter, *http.Request, session)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := s.requestToken(r)
+		token := s.RequestToken(r)
 		if token == "" {
 			writeError(w, 401, "Authentication required")
 			return
@@ -274,7 +266,7 @@ func (s *Server) setAuthCookies(w http.ResponseWriter, r *http.Request, token, k
 	if token == "" {
 		maxAge = -1
 	}
-	secure := s.secure(r)
+	secure := s.Secure(r)
 	for _, c := range []struct {
 		name, value string
 		httpOnly    bool
@@ -306,7 +298,7 @@ func (s *Server) lendSession(w http.ResponseWriter, r *http.Request, sess sessio
 	if req.Duration <= 0 || req.Duration > 24*3600 {
 		req.Duration = 24 * 3600
 	}
-	token, now := newToken(), time.Now()
+	token, now := account.NewToken(), time.Now()
 	until := now.Add(time.Duration(req.Duration) * time.Second)
 	if err := s.store.CreateTimedSession(r.Context(), token, sess.user.ID, until); err != nil {
 		log.Printf("sessions: %v", err)
@@ -330,7 +322,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, sess session) {
 
 func (s *Server) features(w http.ResponseWriter, r *http.Request) {
 	body := fixture("features")                                    // every feature off, then the two this server has
-	body["oauth"], body["passwordLogin"] = s.tidoly(), lan.From(r) // own accounts log in only at home
+	body["oauth"], body["passwordLogin"] = s.Tidoly(), lan.From(r) // own accounts log in only at home
 	body["facialRecognition"], body["reverseGeocoding"] = s.faces(r.Context()) != nil, true
 	body["trash"] = true // so that the app's "delete" asks for the trash, not for deleting at once
 	writeJSON(w, 200, body)
@@ -339,7 +331,7 @@ func (s *Server) features(w http.ResponseWriter, r *http.Request) {
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	body := fixture("config")
 	body["isInitialized"], body["isOnboarded"] = true, true
-	body["oauthButtonText"], body["externalDomain"] = "Login with tidoly", s.loginBase()
+	body["oauthButtonText"], body["externalDomain"] = "Login with tidoly", s.LoginBase()
 	body["trashDays"] = TrashDays
 	writeJSON(w, 200, body)
 }
@@ -355,17 +347,17 @@ func (s *Server) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "state and codeChallenge are required")
 		return
 	}
-	if !s.tidoly() {
+	if !s.Tidoly() {
 		writeError(w, 400, "This server is not connected to tidoly")
 		return
 	}
-	q := url.Values{"slug": {s.Link().Slug}, "redirect": {s.mobileRedirect()}, "state": {req.State}, "cc": {req.CodeChallenge}}
-	writeJSON(w, 201, map[string]any{"url": s.cfg.HomeURL + "/stow/login?" + q.Encode()})
+	q := url.Values{"slug": {s.Link().Slug}, "redirect": {s.MobileRedirect()}, "state": {req.State}, "cc": {req.CodeChallenge}}
+	writeJSON(w, 201, map[string]any{"url": s.HomeURL() + "/stow/login?" + q.Encode()})
 }
 
 // oauthMobileRedirect hands the ticket to the app: home can only send a browser to an http(s) address.
 func (s *Server) oauthMobileRedirect(w http.ResponseWriter, r *http.Request) {
-	if s.finishWebLogin(w, r) {
+	if s.FinishWebLogin(w, r) {
 		return
 	}
 	w.Header().Set("Location", "app.immich:///oauth-callback?"+r.URL.RawQuery)
@@ -386,12 +378,12 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "No ticket in the callback address")
 		return
 	}
-	user, token, err := s.ticketLogin(r.Context(), back.Query().Get("code"), req.CodeVerifier)
+	user, token, err := s.TicketLogin(r.Context(), back.Query().Get("code"), req.CodeVerifier)
 	switch {
-	case errors.Is(err, errNoAccount):
+	case errors.Is(err, account.ErrNoAccount):
 		writeError(w, 403, "This Google account has no account on this server. Ask its owner to add it")
 		return
-	case errors.Is(err, errBlocked):
+	case errors.Is(err, account.ErrBlocked):
 		writeError(w, 403, "The owner of this server has shut login with tidoly for this account")
 		return
 	case err != nil:
@@ -407,13 +399,11 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, body)
 }
 
-var errAlreadyUsed = errors.New("already used")
+// HashPassword is a password as it is kept: an account's, or a shared link's.
+func HashPassword(password string) string { return account.HashPassword(password) }
 
-func newToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
+// Changed tells a person's connected devices that something of theirs changed; the app answers with a sync.
+func (s *Server) Changed(userID string) { s.hub.emit(userID, "on_asset_update", map[string]any{}) }
 
 // storage is the disk the person's new photos go to: how large, how much used, how much left — what the
 // app shows under its settings.
@@ -444,4 +434,35 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%d B", n)
 	}
 	return fmt.Sprintf("%.1f %s", v, units[i])
+}
+
+// passwordLogin is the app's login with an address and a password: POST /api/auth/login.
+func (s *Server) passwordLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Email, Password string }
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req) != nil {
+		writeError(w, 400, "Bad request")
+		return
+	}
+	user, token, err := s.LocalLogin(r, req.Email, req.Password)
+	switch {
+	case errors.Is(err, account.ErrNotHome):
+		writeError(w, 403, "Log in with an address and a password only at home, on the same Wi-Fi")
+		return
+	case errors.Is(err, account.ErrWait):
+		writeError(w, 429, "Too many wrong tries; wait a minute")
+		return
+	case errors.Is(err, account.ErrBadLogin):
+		writeError(w, 401, "Incorrect email or password")
+		return
+	case err != nil:
+		log.Printf("login: %v", err)
+		writeError(w, 500, "Internal error")
+		return
+	}
+	log.Printf("logged in (app): %s", user.Email)
+	s.setAuthCookies(w, r, token, "password")
+	body := fixture("login")
+	body["accessToken"], body["userId"], body["userEmail"], body["name"] = token, user.ID, user.Email, user.Name
+	body["isAdmin"], body["isOnboarded"] = user.IsAdmin, true
+	writeJSON(w, 201, body)
 }

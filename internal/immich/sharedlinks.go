@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/tidoly-com/stow/internal/account"
 	"log"
 	"net/http"
 	"strings"
@@ -27,7 +28,7 @@ import (
 const passwordShown = "********"
 
 // LinksOn says whether shared links work here now.
-func (s *Server) LinksOn() bool { return s.tidoly() && s.Link().Host != "" }
+func (s *Server) LinksOn() bool { return s.Tidoly() && s.Link().Host != "" }
 
 // LinkAddress is the address a link opens at, outside.
 func (s *Server) LinkAddress(l store.SharedLink) string {
@@ -92,9 +93,9 @@ func expiry(raw *string) (string, bool) {
 
 // NewSharedLink makes a link of an album (albumID) or of photos chosen one by one.
 func (s *Server) NewSharedLink(ctx context.Context, owner store.User, albumID string, assetIDs []string, l store.SharedLink, password string) (store.SharedLink, error) {
-	l.ID, l.Key, l.OwnerID, l.AlbumID, l.CreatedAt = store.NewID(), newToken(), owner.ID, albumID, store.Timestamp(time.Now())
+	l.ID, l.Key, l.OwnerID, l.AlbumID, l.CreatedAt = store.NewID(), account.NewToken(), owner.ID, albumID, store.Timestamp(time.Now())
 	if password != "" {
-		l.Password = hashPassword(password)
+		l.Password = account.HashPassword(password)
 	}
 	return l, s.store.AddSharedLink(ctx, l, assetIDs)
 }
@@ -216,7 +217,7 @@ func (s *Server) linkUpdate(w http.ResponseWriter, r *http.Request, sess session
 		case v == nil || *v == "":
 			l.Password = ""
 		case *v != passwordShown:
-			l.Password = hashPassword(*v)
+			l.Password = account.HashPassword(*v)
 		}
 	}
 	if v, sent := text("expiresAt"); sent {
@@ -324,20 +325,20 @@ func (s *Server) OpenLink(r *http.Request, key string) (store.SharedLink, string
 // ErrWrongPassword: the password given for a link is not its password, or too many wrong ones came lately.
 var ErrWrongPassword = errors.New("wrong password")
 
-var linkGuesses = tries{wrong: map[string]int{}, until: map[string]time.Time{}}
+var linkGuesses = account.NewTries()
 
 // UnlockLink takes the password for a link and, when it is right, opens the link in this browser.
 func (s *Server) UnlockLink(w http.ResponseWriter, r *http.Request, l store.SharedLink, password string) error {
-	if linkGuesses.blocked(l.ID) { // everyone comes through the tunnel from this machine: count by link, not by address
+	if linkGuesses.Blocked(l.ID) { // everyone comes through the tunnel from this machine: count by link, not by address
 		return ErrWrongPassword
 	}
-	ok := passwordMatches(l.Password, password)
-	linkGuesses.note(l.ID, ok)
+	ok := account.PasswordMatches(l.Password, password)
+	linkGuesses.Note(l.ID, ok)
 	if !ok {
 		return ErrWrongPassword
 	}
 	http.SetCookie(w, &http.Cookie{Name: linkCookie(l), Value: linkProof(l), Path: "/", MaxAge: 30 * 24 * 3600,
-		HttpOnly: true, Secure: s.secure(r), SameSite: http.SameSiteLaxMode})
+		HttpOnly: true, Secure: s.Secure(r), SameSite: http.SameSiteLaxMode})
 	return nil
 }
 
