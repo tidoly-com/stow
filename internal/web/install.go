@@ -51,9 +51,11 @@ type step struct {
 }
 
 // stepsAt is the row of steps with the given one (from 1) being taken.
-func stepsAt(n int) []step {
-	out := make([]step, len(installSteps))
-	for i, name := range installSteps {
+func stepsAt(n int) []step { return stepsOf(installSteps, n) }
+
+func stepsOf(names []string, n int) []step {
+	out := make([]step, len(names))
+	for i, name := range names {
 		out[i] = step{N: i + 1, Name: name}
 		switch {
 		case i+1 < n:

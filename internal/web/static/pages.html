@@ -13,7 +13,7 @@
 {{if .UploadOwn}}<label class="upload button quiet" data-own><input type="file" multiple hidden>{{template "i" "upload"}}<span>올리기</span></label>{{else if .Upload}}<label class="upload button quiet"><input type="file" multiple accept="image/*,video/*" hidden>{{template "i" "upload"}}<span>올리기</span></label>{{end}}
 <details class="me"><summary aria-label="내 계정">{{.Me}}</summary><div class="menu">
 <div class="who">{{with .User.Name}}<b>{{.}}</b><br>{{end}}{{.User.Email}}</div>
-<a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a><a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
+{{if not .Alone}}<a href="/status">폰 연결 · 상태</a><a href="/links">공유 링크</a>{{end}}<a href="/help">도움말</a><a href="/me/password">비밀번호 바꾸기</a>
 <div class="theme" role="group" aria-label="화면"><span>화면</span><button type="button" data-theme-set="system">시스템</button><button type="button" data-theme-set="light">밝게</button><button type="button" data-theme-set="dark">어둡게</button></div>
 <form method="post" action="/logout"><button>로그아웃</button></form>
 </div></details>
@@ -31,7 +31,7 @@
 </div>{{end}}
 <label for="drawer" class="scrim"></label>
 <nav class="side">
-{{with .Spaces}}<div class="spaces" role="group" aria-label="공간"><a href="/"{{if not $.Space}} aria-current="page"{{end}}>사진</a>{{range .}}<a href="{{.Link}}"{{if and $.Space (eq .Name $.Space.Name)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>{{end}}
+{{if not .Alone}}{{with .Spaces}}<div class="spaces" role="group" aria-label="공간"><a href="/"{{if not $.Space}} aria-current="page"{{end}}>사진</a>{{range .}}<a href="{{.Link}}"{{if and $.Space (eq .Name $.Space.Name)}} aria-current="page"{{end}}>{{.Name}}</a>{{end}}</div>{{end}}{{end}}
 {{with .Space}}{{range .Menu}}<a href="{{.Link}}"{{if eq .Tab $.Tab}} aria-current="page"{{end}}><svg class="i" aria-hidden="true"><use href="{{.Icon}}"/></svg>{{.Name}}</a>
 {{if and (eq .Tab $.Tab) $.SideSub}}<div class="side-sub">{{range $.SideSub}}<a href="{{.Link}}"{{if .Deeper}} class="inner deeper"{{else if .Inner}} class="inner"{{end}}{{if .Current}} aria-current="page"{{end}} title="{{.Name}}"><span>{{.Name}}</span></a>{{end}}</div>
 {{end}}{{end}}{{else}}<a href="/"{{if eq .Tab "timeline"}} aria-current="page"{{end}}>{{template "i" "photos"}}사진</a>
@@ -327,7 +327,7 @@ addEventListener("load", () => {
 <button type="button" class="way" data-theme-set="light">{{template "i" "sun"}}<b>밝게</b><span>늘 밝은 화면</span></button>
 <button type="button" class="way" data-theme-set="dark">{{template "i" "moon"}}<b>어둡게</b><span>늘 어두운 화면</span></button>
 </div>
-<p><a class="button" href="/start/folders">다음: 기존 사진</a></p>
+<p><a class="button" href="{{.Next.Link}}">{{.Next.Name}}</a></p>
 </div></body></html>{{end}}
 
 {{define "start-folders"}}{{template "head" .}}<div class="setup">
@@ -353,11 +353,19 @@ addEventListener("load", () => {
 <p><a class="button" href="/outside">다음: 연결 설정</a></p>
 </div></body></html>{{end}}
 
+{{define "start-space"}}{{template "head" .}}<div class="setup">
+<h1>{{template "name"}}</h1>{{template "steps" .Steps}}
+{{template "start-extra" .}}
+<p><a class="button" href="{{.Next.Link}}">{{.Next.Name}}</a></p>
+</div><dialog class="sheet"></dialog><div class="toast" role="status" hidden></div><script src="/static/app.js"></script></body></html>{{end}}
+
+{{define "start-extra"}}{{/* a build without photos (Alone) takes its space's own first step here: Space.Start */}}{{end}}
+
 {{define "outside"}}{{template "head" .}}<div class="setup">
 <h1>{{template "name"}}</h1>{{template "steps" .Steps}}
 <h2>연결 설정 <small class="dim">접속 위치</small></h2>
 {{template "outside-ways" .}}
-<p><a class="button" href="/welcome">다음: 폰 연결</a></p>
+<p><a class="button" href="{{.Next.Link}}">{{.Next.Name}}</a></p>
 </div></body></html>{{end}}
 
 {{define "phone"}}{{template "head" .}}<div class="setup">
@@ -374,9 +382,12 @@ addEventListener("load", () => {
 
 {{define "welcome"}}{{template "head" .}}<div class="setup">
 <h1>{{template "name"}}</h1>{{template "steps" .Steps}}
-<h2>폰 연결</h2>
+{{if .Alone}}<h2>다른 기기에서 열기</h2>
+<p>폰이나 다른 PC 의 브라우저로 이 QR 을 찍거나 주소를 열면 같은 문서를 봅니다.</p>
+<div class="phone"><img src="/welcome/qr.png" alt="서버 주소 QR" width="200" height="200">{{template "address" .Addr}}</div>
+{{else}}<h2>폰 연결</h2>
 <p>QR코드를 통해 해당 페이지를 폰으로 열어서 주소를 복사하세요.</p>
-<div class="phone"><img src="/welcome/qr.png" alt="서버 주소 QR" width="200" height="200">{{template "address" .Addr}}{{template "invite" .Invite}}</div>
+<div class="phone"><img src="/welcome/qr.png" alt="서버 주소 QR" width="200" height="200">{{template "address" .Addr}}{{template "invite" .Invite}}</div>{{end}}
 <div class="notice">{{template "i" "info"}}<div>{{if eq system "linux"}}<b>tidoly stow 는 이 PC 의 서비스로 백그라운드에서 동작합니다.</b>부팅하면 저절로 뜹니다.{{else}}<b>이 창을 닫으면 tidoly stow 는 {{if eq system "windows"}}트레이{{else}}메뉴 막대{{end}}로 들어가 백그라운드에서 동작합니다.</b>{{if eq system "windows"}}트레이{{else}}메뉴 막대{{end}}의 tidoly stow 아이콘을 누르면 창을 다시 열 수 있습니다.{{end}}</div></div>
 <p><a class="button" href="/">설정 완료</a></p>
 </div></body></html>{{end}}
@@ -513,35 +524,35 @@ addEventListener("load", () => {
 {{with .Left}}<div class="notice">{{template "i" "info"}}<div><b>사진을 정리하는 중입니다 — 남은 작업 {{.}}개</b>{{with $.Now}} · 지금 {{.}}{{end}} · <a href="/status#jobs">진행 보기</a></div></div>{{end}}
 {{with .Arrivals}}<div class="notice">{{template "i" "info"}}<div><b>tidoly 로 처음 들어온 사람이 있습니다: {{.}}</b>모르는 사람이면 아래 사용자에서 그 사람의 tidoly 로그인을 막고, tidoly 에서도 빼 주세요. <form method="post" action="/admin/tidoly/seen"><button class="button quiet">확인했습니다</button></form></div></div>{{end}}
 {{with .Moved}}<div class="notice">{{template "i" "check"}}<div><b>이제 새 사진은 {{.}} 에 들어갑니다.</b>전에 올라온 사진은 원래 위치에 그대로 있고, 그대로 보입니다. 원래 위치로 돌리려면 아래 저장 위치에서 고르세요.</div></div>{{end}}
-<h2 class="with-act">저장 위치{{if not .Away}} <button type="button" class="icon" data-browse aria-label="위치 더하기" title="위치 더하기">{{template "i" "disk-plus"}}</button>{{end}}</h2>
-<p class="dim">사진과 설정파일이 올라가는 경로입니다.</p>
+<h2 class="with-act">저장 위치{{if not (or .Away .Alone)}} <button type="button" class="icon" data-browse aria-label="위치 더하기" title="위치 더하기">{{template "i" "disk-plus"}}</button>{{end}}</h2>
+<p class="dim">{{if .Alone}}문서와 설정파일이 저장되는 경로입니다.{{else}}사진과 설정파일이 올라가는 경로입니다.{{end}}</p>
 <form class="rows" method="post" action="/admin/location" data-auto>
-{{range .Places}}<label class="row{{if .Current}} on{{end}}{{if .Missing}} off{{end}}"><input type="radio" name="location" value="{{.ID}}"{{if .Current}} checked{{end}}{{if .Missing}} disabled{{end}}><span class="ico">{{template "i" "disk"}}</span><span class="name"><b>{{.Name}}</b>{{if .Current}} <span class="tag">업로드 사진 저장 위치</span>{{end}}{{if .Missing}} <span class="tag warn">연결 안 됨</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span><span class="count">사진 · 영상 {{.Photos}}개<br><span class="dim">{{.Size}}</span>{{if .Mine}} · <a href="/?show=mine&amp;at={{or .ID "home"}}">내 사진 보기</a>{{end}}</span><span class="use">{{if .Missing}}디스크를 연결하면 다시 보입니다{{else if .Total}}{{.Total}} 중 {{.Free}} 남음<progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}</span></label>
+{{range .Places}}<label class="row{{if .Current}} on{{end}}{{if .Missing}} off{{end}}"><input type="radio" name="location" value="{{.ID}}"{{if .Current}} checked{{end}}{{if .Missing}} disabled{{end}}><span class="ico">{{template "i" "disk"}}</span><span class="name"><b>{{.Name}}</b>{{if .Current}} <span class="tag">{{if $.Alone}}새 문서 저장 위치{{else}}업로드 사진 저장 위치{{end}}</span>{{end}}{{if .Missing}} <span class="tag warn">연결 안 됨</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span>{{if not $.Alone}}<span class="count">사진 · 영상 {{.Photos}}개<br><span class="dim">{{.Size}}</span>{{if .Mine}} · <a href="/?show=mine&amp;at={{or .ID "home"}}">내 사진 보기</a>{{end}}</span>{{end}}<span class="use">{{if .Missing}}디스크를 연결하면 다시 보입니다{{else if .Total}}{{.Total}} 중 {{.Free}} 남음<progress max="{{.Max}}" value="{{.Value}}"></progress>{{end}}</span></label>
 {{end}}</form>
 {{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{end}}
-<h2 class="with-act">기존 사진 폴더{{if not .Away}} <button type="button" class="icon" data-browse="import" aria-label="폴더 등록" title="폴더 등록">{{template "i" "folder-plus"}}</button>{{end}}</h2>
+{{if not .Alone}}<h2 class="with-act">기존 사진 폴더{{if not .Away}} <button type="button" class="icon" data-browse="import" aria-label="폴더 등록" title="폴더 등록">{{template "i" "folder-plus"}}</button>{{end}}</h2>
 <p class="dim">업로드 없이 이 장비의 사진을 인덱싱하여 봅니다. 외장USB등을 등록해놓고 연결하면 유용합니다.</p>
 {{if .Folders}}<div class="rows" id="folders">
 {{range .Folders}}<div class="row folder{{if .Paused}} off{{end}}"{{if .Running}} data-running{{end}}><span class="ico">{{template "i" "folder"}}</span><span class="name"><b>{{.Name}}</b>{{if .Paused}} <span class="tag warn">꺼 둠</span>{{else if .Missing}} <span class="tag warn">연결 안 됨</span>{{end}}{{if .Running}} <span class="tag">훑는 중</span>{{end}}<span title="{{.Path}}">{{.Path}}</span></span><span class="count">{{.Owner}} 의 사진으로 · {{.Photos}}개{{if .Mine}} · <a href="/?show=mine&amp;at={{.ID}}">보기</a>{{end}}<br><span class="dim">{{if .Paused}}사진 목록에서 빠져 있습니다. 읽어 둔 것은 그대로 있어 켜면 바로 돌아옵니다{{else if .State}}{{.State}}{{else}}{{.Size}}{{end}}</span></span><span class="acts">{{if .Paused}}<form method="post" action="/admin/import/pause"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet">다시 켜기</button></form>{{else}}<form method="post" action="/admin/import/scan"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet"{{if or .Running .Missing}} disabled{{end}}>다시 훑기</button></form><form method="post" action="/admin/import/pause"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="on" value="1"><button class="button quiet"{{if .Running}} disabled{{end}}>잠시 끄기</button></form>{{end}}<form method="post" action="/admin/import/remove"><input type="hidden" name="id" value="{{.ID}}"><button class="button quiet danger" data-confirm="이 폴더의 등록을 풀까요? 사진이 목록에서 빠지고, 읽어 둔 정보와 작은 그림을 지웁니다 — 다시 등록하면 처음부터 읽습니다. 폴더의 파일은 그대로 남습니다. 나중에 다시 쓸 수도 있으면 '잠시 끄기' 를 쓰세요."{{if .Running}} disabled{{end}}>등록 풀기</button></form></span></div>
 {{end}}</div>{{end}}
-{{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{end}}
+{{if .Away}}<p class="dim">{{.AwayFolders}}</p>{{end}}{{end}}
 {{template "admin-extra" .}}
 <h2>연결 설정 <small class="dim">접속 위치</small></h2>
 {{template "outside-ways" .}}
-<h2>자동 앨범</h2>
+{{if not .Alone}}<h2>자동 앨범</h2>
 <div class="rows"><div class="row auto{{if eq .Faces "on"}} on{{else}} off{{end}}"><span class="ico">{{template "i" "people"}}</span><span class="name"><b>얼굴인식</b>{{if eq .Faces "on"}} <span class="tag">켜 둠</span>{{else if eq .Faces "waiting"}} <span class="tag">모델 받는 중</span>{{end}}<span>2번이상 나온 얼굴을 하나로 모아서 보게 합니다.</span></span>
 <span class="acts">{{if eq .Faces "none"}}<span class="dim">이 PC 에서는 쓸 수 없습니다</span>{{else if eq .Faces "waiting"}}<span class="dim">받는 중</span>{{else}}<form method="post" action="/admin/faces">{{if eq .Faces "on"}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form>{{end}}</span></div>
 <div class="row auto{{if .ScreenshotsOn}} on{{else}} off{{end}}"><span class="ico">{{template "i" "photos"}}</span><span class="name"><b>화면 캡처</b>{{if .ScreenshotsOn}} <span class="tag">켜 둠</span>{{end}}<span>스크린샷을 화면 캡처 앨범에 따로 모읍니다. 타임라인에도 그대로 보입니다.</span></span>
 <span class="acts"><form method="post" action="/admin/screenshots">{{if .ScreenshotsOn}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form></span></div>
 <div class="row auto{{if .CouponsOn}} on{{else}} off{{end}}"><span class="ico">{{template "i" "album"}}</span><span class="name"><b>쿠폰인식</b>{{if .CouponsOn}} <span class="tag">켜 둠</span>{{end}}<span>바코드가 있는 스크린샷 · 저장한 그림을 쿠폰 앨범에 모읍니다.{{if not .CouponDays}} 유효기간은 맥에서만 읽습니다.{{end}}</span></span>
-<span class="acts"><form method="post" action="/admin/coupons">{{if .CouponsOn}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form></span></div></div>
+<span class="acts"><form method="post" action="/admin/coupons">{{if .CouponsOn}}<button class="button quiet">끄기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet">켜기</button>{{end}}</form></span></div></div>{{end}}
 <h2 class="with-act" id="users">사용자 <button type="button" class="icon" data-act="add-user" aria-label="사용자 더하기" title="사용자 더하기">{{template "i" "person-plus"}}</button>{{if .Outside.Host}}<form class="switch" method="post" action="/admin/tidoly/auto" data-auto title="tidoly 에 등록한 계정을 바로 사용합니다. 꺼져 있으면 tidoly 에도 여기에도 메일 주소를 등록해야 합니다."><label><input type="checkbox" name="on" value="1" role="switch"{{if .Outside.AutoAdd}} checked{{end}}><span>tidoly 계정 바로 받기</span></label></form>{{end}}</h2>
-<p class="dim">이 시스템을 쓸 계정을 추가합니다. 추가된 사용자는 별도 저장공간을 가지며 공유하기를 통해 업로드된 사진을 함께 볼 수 있습니다.</p>
+<p class="dim">이 시스템을 쓸 계정을 추가합니다. {{if .Alone}}추가된 사용자는 자기 문서를 따로 가집니다.{{else}}추가된 사용자는 별도 저장공간을 가지며 공유하기를 통해 업로드된 사진을 함께 볼 수 있습니다.{{end}}</p>
 <p class="mark">※ 구글 메일 주소로 등록해야 tidoly로그인 인증이 가능합니다.</p>
 <div class="rows users">
 {{range .Users}}{{$u := .}}<div class="row acct"><i class="av t{{.Tone}}">{{.Initial}}</i><span class="name"><b>{{.Name}}</b>{{if .Blocked}} <span class="tag warn">tidoly 로그인 막음</span>{{end}}<span>{{.Email}}</span><span class="dim">{{.Came}}</span></span>
 <span class="acts">{{if $.CanChoose}}<form method="post" action="/admin/location" data-auto><input type="hidden" name="user" value="{{.ID}}"><select name="location" aria-label="{{.Email}} 의 새 사진이 가는 곳" title="이 사람의 새 사진이 가는 곳"><option value="default">사진이 가는 곳: 기본</option>{{range $.Places}}{{if not .Missing}}<option value="{{or .ID "home"}}"{{if eq $u.Location (or .ID "home")}} selected{{end}}>{{.Path}}</option>{{end}}{{end}}</select></form>{{end}}
-<button type="button" class="button quiet" data-copy="{{.Invite}}" title="이 사람에게 보낼 안내 — Immich 설치 · 서버 주소 · 로그인 주소">{{template "i" "share"}}<span>안내 복사</span></button>
+<button type="button" class="button quiet" data-copy="{{.Invite}}" title="이 사람에게 보낼 안내 — {{if $.Alone}}주소 · 로그인 주소{{else}}Immich 설치 · 서버 주소 · 로그인 주소{{end}}">{{template "i" "share"}}<span>안내 복사</span></button>
 {{if and $.Outside.Host (ne .Tone -1)}}<form method="post" action="/admin/users/block"><input type="hidden" name="user" value="{{.ID}}">{{if .Blocked}}<button class="button quiet">tidoly 로그인 풀기</button>{{else}}<input type="hidden" name="on" value="1"><button class="button quiet danger" data-confirm="이 사람의 tidoly 로그인을 막을까요? 밖에서 열어 둔 연결이 바로 끊깁니다. 집 안에서 비밀번호로는 그대로 들어옵니다.">tidoly 로그인 막기</button>{{end}}</form>{{end}}
 <details class="reset"><summary class="button quiet">비밀번호 새로 정하기</summary><form method="post" action="/admin/users/password"><input type="hidden" name="user" value="{{.ID}}"><input name="password" type="password" placeholder="새 비밀번호 (네 글자 이상)" minlength="4" autocomplete="new-password" required aria-label="{{.Email}} 의 새 비밀번호"> <button class="button quiet">저장</button></form></details></span></div>
 {{end}}<form class="row acct new" method="post" action="/admin/users" hidden><i class="av">{{template "i" "person-plus"}}</i><span class="fields"><input name="name" placeholder="이름" maxlength="100" autocomplete="off" required aria-label="이름"><input name="email" type="email" placeholder="로그인 주소 (구글 메일 주소)" autocomplete="off" required aria-label="로그인 주소"><input name="password" type="password" placeholder="비밀번호 (네 글자 이상)" minlength="4" autocomplete="new-password" required aria-label="비밀번호"></span><span class="acts"><button class="button">저장</button> <button type="button" class="button quiet" data-act="cancel-user">취소</button></span></form>

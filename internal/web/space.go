@@ -18,6 +18,9 @@ type Space struct {
 	Link  string // where the switch leads
 	Menu  []MenuItem
 	Trash string // where 휴지통 leads from its side, "" for the photos' trash
+	// Start names the space's own first step, which a build without photos takes in theirs: drawn from its
+	// "start-extra" template at /start/space. "" for none
+	Start string
 }
 
 // A TrashTab is one kind of thing a space keeps in the trash, as a tab over the trash beside the photos'
@@ -34,19 +37,22 @@ type TrashTabLine struct {
 	Current    bool
 }
 
-// TrashTabsFor are the trash's tabs — the photos' first — with the one at current marked; none when no
+// TrashTabsFor are the trash's tabs — the photos' first, where there are photos — with the one at current marked; none when no
 // space keeps a trash of its own.
 func (w *Web) TrashTabsFor(ctx context.Context, user store.User, current string) []TrashTabLine {
 	if len(w.TrashTabs) == 0 {
 		return nil
 	}
-	photos := 0
-	if w.Store != nil {
-		if assets, err := w.Store.TrashedAssets(ctx, user.ID, trashLimit); err == nil {
-			photos = len(assets)
+	var lines []TrashTabLine
+	if !w.Alone { // a build without photos has no trash of photos
+		photos := 0
+		if w.Store != nil {
+			if assets, err := w.Store.TrashedAssets(ctx, user.ID, trashLimit); err == nil {
+				photos = len(assets)
+			}
 		}
+		lines = append(lines, TrashTabLine{Name: "사진", Link: "/trash", Count: photos, Current: current == "/trash"})
 	}
-	lines := []TrashTabLine{{Name: "사진", Link: "/trash", Count: photos, Current: current == "/trash"}}
 	for _, t := range w.TrashTabs {
 		n := 0
 		if t.Count != nil {

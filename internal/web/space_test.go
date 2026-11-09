@@ -2,6 +2,10 @@ package web
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -82,5 +86,81 @@ func TestASpacesTrashIsATabBesideThePhotos(t *testing.T) {
 	}
 	if (&Web{}).TrashTabsFor(context.Background(), store.User{}, "/trash") != nil {
 		t.Error("tabs without a space's trash")
+	}
+}
+
+// A build without photos (Alone, #47): its space is the whole menu, on its own pages and on the admin page;
+// there is no switch, no photo page answers, the admin page has no photos' parts, the trash has no photos'
+// tab, and the first steps take the space's own in place of the photos'.
+func TestABuildWithoutPhotos(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "stow.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	owner, err := st.UpsertUser(ctx, "local:kim@example.com", "kim@example.com", "김", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &Web{Store: st, Dir: t.TempDir(), Address: "http://192.168.0.10:30991", Edition: "Plus", Alone: true,
+		User:     func(*http.Request) (store.User, bool) { return owner, true },
+		Outside:  func(context.Context) Outside { return Outside{} },
+		Arrivals: func(context.Context) ([]store.User, error) { return nil, nil },
+		Spaces: []Space{{Name: "보관함", Link: "/docs", Trash: "/docs/trash", Start: "기존 문서",
+			Menu: []MenuItem{{Name: "문서", Icon: "/x.svg#doc", Link: "/docs", Tab: "docs"}}}},
+		TrashTabs: []TrashTab{{Name: "문서", Link: "/docs/trash"}}}
+	noop := func(http.ResponseWriter, *http.Request) {}
+	srv := httptest.NewServer(w.Handler(noop, noop))
+	defer srv.Close()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string) (*http.Response, string) {
+		res, err := client.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res, string(b)
+	}
+	if res, _ := get("/"); res.StatusCode != 303 || res.Header.Get("Location") != "/docs" {
+		t.Errorf("/: %d to %q", res.StatusCode, res.Header.Get("Location"))
+	}
+	if res, _ := get("/trash"); res.Header.Get("Location") != "/docs/trash" {
+		t.Errorf("/trash: %d to %q", res.StatusCode, res.Header.Get("Location"))
+	}
+	for _, path := range []string{"/people", "/albums", "/places", "/links", "/status", "/start/folders", "/start/auto", "/phone"} {
+		if res, _ := get(path); res.StatusCode != 404 {
+			t.Errorf("%s answers %d without photos", path, res.StatusCode)
+		}
+	}
+	_, admin := get("/admin")
+	for _, gone := range []string{`class="spaces"`, `data-browse aria-label="위치 더하기"`, "인물", "기존 사진 폴더", "자동 앨범", "얼굴인식", "폰 연결 · 상태", "공유 링크", "사진 · 영상", "Immich"} {
+		if strings.Contains(admin, gone) {
+			t.Errorf("the admin page without photos shows %q", gone)
+		}
+	}
+	for _, want := range []string{`<a href="/docs"><svg class="i" aria-hidden="true"><use href="/x.svg#doc"/></svg>문서</a>`, `<a href="/docs/trash">`, "문서와 설정파일이 저장되는 경로입니다.", "새 문서 저장 위치", "자기 문서를 따로 가집니다", "연결 설정"} {
+		if !strings.Contains(admin, want) {
+			t.Errorf("the admin page without photos has no %q", want)
+		}
+	}
+	if tabs := w.TrashTabsFor(ctx, owner, "/docs/trash"); len(tabs) != 1 || tabs[0].Name != "문서" {
+		t.Errorf("trash tabs: %+v", tabs)
+	}
+	if got := strings.Join(w.stepNames(), " "); got != "저장 위치 준비 첫 계정 화면 기존 문서 연결 설정 다른 기기" {
+		t.Errorf("first steps: %s", got)
+	}
+	if _, screen := get("/start/screen"); !strings.Contains(screen, `<a class="button" href="/start/space">다음: 기존 문서</a>`) {
+		t.Errorf("the screen step does not lead to the space's own:\n%s", screen)
+	}
+	if res, page := get("/start/space"); res.StatusCode != 200 || !strings.Contains(page, `<a class="button" href="/outside">다음: 연결 설정</a>`) {
+		t.Errorf("the space's own step: %d\n%s", res.StatusCode, page)
+	}
+	if _, last := get("/welcome"); !strings.Contains(last, "다른 기기에서 열기") || strings.Contains(last, "Immich") || !strings.Contains(last, `<a class="button" href="/">설정 완료</a>`) {
+		t.Errorf("the last step:\n%s", last)
+	}
+	if text := w.invite(ctx, "lee@example.com"); strings.Contains(text, "Immich") || !strings.Contains(text, "lee@example.com") || !strings.Contains(text, "http://192.168.0.10:30991") {
+		t.Errorf("invite: %s", text)
 	}
 }
